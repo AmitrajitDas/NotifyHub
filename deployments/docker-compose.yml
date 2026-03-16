@@ -1,0 +1,141 @@
+name: notifyhub
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+      target: api
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      PORT: "8080"
+      ENVIRONMENT: development
+      LOG_LEVEL: debug
+      DATABASE_URL: postgres://notifyhub:notifyhub@postgres:5432/notifyhub?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:29092
+    restart: on-failure
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+      target: worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: development
+      LOG_LEVEL: debug
+      DATABASE_URL: postgres://notifyhub:notifyhub@postgres:5432/notifyhub?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:29092
+      WORKER_EMAIL_CONCURRENCY: "5"
+      WORKER_PUSH_CONCURRENCY: "3"
+      WORKER_SMS_CONCURRENCY: "2"
+      WORKER_INAPP_CONCURRENCY: "5"
+    restart: on-failure
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: notifyhub
+      POSTGRES_USER: notifyhub
+      POSTGRES_PASSWORD: notifyhub
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notifyhub -d notifyhub"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    volumes:
+      - kafkadata:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    ports:
+      - "8090:8080"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: notifyhub-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafanadata:/var/lib/grafana
+
+volumes:
+  pgdata:
+  kafkadata:
+  grafanadata:

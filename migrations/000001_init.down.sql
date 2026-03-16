@@ -1,0 +1,6 @@
+DROP TABLE IF EXISTS delivery_logs;
+DROP TABLE IF EXISTS notifications;
+DROP TABLE IF EXISTS preferences;
+DROP TABLE IF EXISTS templates;
+DROP TABLE IF EXISTS api_clients;
+DROP EXTENSION IF EXISTS "uuid-ossp";

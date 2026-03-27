@@ -26,18 +26,18 @@ WHERE idempotency_key = $1;
 -- name: ListNotifications :many
 SELECT * FROM notifications
 WHERE
-    ($1::text = '' OR recipient_id = $1) AND
-    ($2::text = '' OR channel = $2) AND
-    ($3::text = '' OR status = $3)
+    (sqlc.arg(recipient_id)::text = '' OR recipient_id = sqlc.arg(recipient_id)) AND
+    (sqlc.arg(channel)::text = '' OR channel = sqlc.arg(channel)) AND
+    (sqlc.arg(status)::text = '' OR status = sqlc.arg(status))
 ORDER BY created_at DESC
-LIMIT $4 OFFSET $5;
+LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
 
 -- name: CountNotifications :one
 SELECT COUNT(*) FROM notifications
 WHERE
-    ($1::text = '' OR recipient_id = $1) AND
-    ($2::text = '' OR channel = $2) AND
-    ($3::text = '' OR status = $3);
+    (sqlc.arg(recipient_id)::text = '' OR recipient_id = sqlc.arg(recipient_id)) AND
+    (sqlc.arg(channel)::text = '' OR channel = sqlc.arg(channel)) AND
+    (sqlc.arg(status)::text = '' OR status = sqlc.arg(status));
 
 -- name: UpdateNotificationStatus :one
 UPDATE notifications

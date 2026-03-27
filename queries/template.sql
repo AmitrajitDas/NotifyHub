@@ -20,13 +20,13 @@ WHERE name = $1 AND is_active = true;
 
 -- name: ListTemplates :many
 SELECT * FROM templates
-WHERE ($1::text = '' OR channel = $1)
+WHERE (sqlc.arg(channel)::text = '' OR channel = sqlc.arg(channel))
 ORDER BY name ASC
-LIMIT $2 OFFSET $3;
+LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
 
 -- name: CountTemplates :one
 SELECT COUNT(*) FROM templates
-WHERE ($1::text = '' OR channel = $1);
+WHERE (sqlc.arg(channel)::text = '' OR channel = sqlc.arg(channel));
 
 -- name: UpdateTemplate :one
 UPDATE templates

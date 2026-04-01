@@ -867,6 +867,197 @@ seed:
 
 ---
 
+## React Native Integration (FCM + WebSocket)
+
+### Overview
+
+The system supports two channels for mobile clients:
+
+| Channel | Mechanism | Use case |
+|---|---|---|
+| `push` | FCM → Firebase → device | Background / killed-app alerts |
+| `inapp` | WebSocket + Redis pub/sub | Foreground, real-time in-app feed |
+
+```
+React Native App
+  ├── Push (FCM)
+  │     RN calls messaging().getToken()
+  │     → POST /api/v1/device-tokens  (register token)
+  │     → Notification API → Kafka push topic → push worker → FCM provider → Firebase → device
+  │
+  └── In-App (WebSocket)
+        RN connects  wss://api/ws?token=<short-lived-jwt>
+        → Notification API → Kafka inapp topic → inapp worker → Redis pub/sub → WS hub → RN
+```
+
+---
+
+### Phase 8: FCM Push Provider
+
+**New table — `device_tokens`**
+
+```sql
+CREATE TABLE device_tokens (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id VARCHAR(255) NOT NULL,
+    token TEXT NOT NULL UNIQUE,
+    platform VARCHAR(20) NOT NULL, -- 'ios', 'android'
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_device_tokens_user ON device_tokens(user_id);
+```
+
+**New API endpoint**
+
+```
+POST /api/v1/device-tokens       # Register/refresh FCM token
+DELETE /api/v1/device-tokens/:token  # Deregister on logout
+```
+
+**FCM provider** (`internal/provider/fcm/fcm.go`)
+
+- Dependency: `firebase.google.com/go/v4`
+- Credentials loaded from `FCM_CREDENTIALS_FILE` env var (service account JSON)
+- On `messaging.ErrCodeUnregistered` response from Firebase → mark token inactive in DB
+- Send `messaging.Message` with `Notification` (title/body) + `Data` (payload for deep linking)
+- Wrap in `gobreaker` circuit breaker
+
+**Push worker** (`internal/worker/push.go`)
+
+```
+consume from notifyhub.notifications.push
+  -> look up active device tokens for recipient_id
+  -> for each token: send via FCM provider (fan-out if multi-device)
+  -> log delivery per token
+  -> if token unregistered: deactivate in DB
+  -> commit offset
+```
+
+**New environment variables**
+
+```env
+FCM_CREDENTIALS_FILE=/etc/notifyhub/fcm-credentials.json
+FCM_PROJECT_ID=your-firebase-project-id
+```
+
+**React Native side (reference)**
+
+```ts
+import messaging from '@react-native-firebase/messaging';
+
+const token = await messaging().getToken();
+await api.post('/api/v1/device-tokens', { token, platform: Platform.OS });
+
+// Handle foreground messages (fallback when WS is disconnected)
+messaging().onMessage(async remoteMessage => { /* update local state */ });
+```
+
+---
+
+### Phase 9: WebSocket Hub (In-App)
+
+**Architecture**
+
+```
+inapp worker
+  → Redis PUBLISH notifyhub:inapp:{recipient_id} <notification JSON>
+
+WS Hub (goroutine per connection)
+  ← Redis SUBSCRIBE notifyhub:inapp:{recipient_id}
+  → write to client WebSocket
+```
+
+**WS Hub** (`internal/api/ws/hub.go`)
+
+- Manages a `sync.Map` of `recipient_id → []conn`
+- On connect: authenticate via short-lived JWT (issued by `POST /api/v1/ws-token`)
+- On connect: subscribe to Redis channel for that `recipient_id`
+- On disconnect: unsubscribe, remove from map
+- Ping/pong keepalive every 30s to detect dead connections
+- Library: `nhooyr.io/websocket` (stdlib-friendly, no gorilla global state)
+
+**New API endpoints**
+
+```
+GET  /api/v1/ws              # WebSocket upgrade endpoint
+POST /api/v1/ws-token        # Issue short-lived JWT for WS auth (60s TTL)
+GET  /api/v1/notifications/feed  # REST fallback: paginated in-app feed
+```
+
+**Inapp worker** (`internal/worker/inapp.go`)
+
+```
+consume from notifyhub.notifications.inapp
+  -> persist notification to DB (status = delivered)
+  -> Redis PUBLISH notifyhub:inapp:{recipient_id} <notification JSON>
+  -> commit offset
+  (no external HTTP call — Redis pub/sub is the delivery mechanism)
+```
+
+**New environment variables**
+
+```env
+WS_JWT_SECRET=your-secret-key
+WS_JWT_TTL_SECONDS=60
+WS_PING_INTERVAL_SECONDS=30
+```
+
+**React Native side (reference)**
+
+```ts
+// 1. Get short-lived token
+const { token } = await api.post('/api/v1/ws-token');
+
+// 2. Connect
+const ws = new WebSocket(`wss://api/api/v1/ws?token=${token}`);
+
+ws.onmessage = (e) => {
+  const notification = JSON.parse(e.data);
+  // dispatch to local state / notification bell
+};
+
+// 3. Reconnect with exponential backoff on close
+```
+
+**Message format over WebSocket**
+
+```json
+{
+  "id": "uuid",
+  "type": "claim_status",
+  "payload": { "claim_id": "CLM-001", "status": "approved" },
+  "created_at": "2025-01-01T00:00:00Z"
+}
+```
+
+---
+
+### Implementation Order for Phases 8–9
+
+1. **Phase 8 — FCM**
+   1. Add `device_tokens` migration
+   2. Add sqlc queries for device token CRUD
+   3. Add `domain.DeviceToken` type
+   4. Add device token repository
+   5. Implement `POST /api/v1/device-tokens` handler
+   6. Implement FCM provider with `firebase.google.com/go/v4`
+   7. Implement push worker with multi-device fan-out
+   8. Wire circuit breaker around FCM provider
+   9. Integration test: register token → send push notification → verify delivery log
+
+2. **Phase 9 — WebSocket**
+   1. Add `POST /api/v1/ws-token` (JWT issuance)
+   2. Implement WS hub with Redis pub/sub fan-out
+   3. Wire `GET /api/v1/ws` upgrade endpoint into chi router
+   4. Implement inapp worker (publishes to Redis, no external provider)
+   5. Add `GET /api/v1/notifications/feed` REST fallback for history
+   6. Integration test: connect WS → send inapp notification → verify message received
+
+---
+
 ## Key Design Principles to Follow
 
 1. **Dependency injection everywhere** — no global state, all dependencies passed via constructors

@@ -19,6 +19,8 @@ type NotificationRepository interface {
 	List(ctx context.Context, filter domain.ListNotificationsFilter) ([]domain.Notification, int64, error)
 	Cancel(ctx context.Context, id uuid.UUID) (*domain.Notification, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.NotificationStatus) (*domain.Notification, error)
+	// ListDueScheduled returns up to limit pending notifications whose scheduled_at <= NOW().
+	ListDueScheduled(ctx context.Context, limit int) ([]domain.Notification, error)
 }
 
 type postgresNotificationRepo struct {
@@ -137,6 +139,18 @@ func (r *postgresNotificationRepo) UpdateStatus(ctx context.Context, id uuid.UUI
 	}
 	n := dbNotificationToDomain(row)
 	return &n, nil
+}
+
+func (r *postgresNotificationRepo) ListDueScheduled(ctx context.Context, limit int) ([]domain.Notification, error) {
+	rows, err := r.q.ListDueScheduledNotifications(ctx, int32(limit))
+	if err != nil {
+		return nil, domain.NewInternalError("failed to list due scheduled notifications", err)
+	}
+	out := make([]domain.Notification, len(rows))
+	for i, row := range rows {
+		out[i] = dbNotificationToDomain(row)
+	}
+	return out, nil
 }
 
 func dbNotificationToDomain(n db.Notification) domain.Notification {

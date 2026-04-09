@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/amitrajitdas31/notifyhub/internal/domain"
+	"github.com/amitrajitdas31/notifyhub/internal/queue"
 	"github.com/amitrajitdas31/notifyhub/internal/repository"
 )
 
@@ -20,21 +21,7 @@ type Publisher interface {
 	Publish(ctx context.Context, topic, key string, payload []byte) error
 }
 
-// NotificationMessage is the envelope written to Kafka.
-type NotificationMessage struct {
-	NotificationID   uuid.UUID      `json:"notification_id"`
-	Channel          domain.Channel `json:"channel"`
-	RecipientID      string         `json:"recipient_id"`
-	RecipientAddress string         `json:"recipient_address"`
-	TemplateID       *uuid.UUID     `json:"template_id,omitempty"`
-	Payload          map[string]any `json:"payload"`
-	Priority         domain.Priority `json:"priority"`
-	Attempt          int            `json:"attempt"`
-	MaxAttempts      int            `json:"max_attempts"`
-	EnqueuedAt       time.Time      `json:"enqueued_at"`
-}
-
-// NotificationService defines business logic for sending and querying notifications.
+//NotificationService defines business logic for sending and querying notifications.
 type NotificationService interface {
 	Send(ctx context.Context, req domain.SendRequest) (*domain.Notification, error)
 	SendBulk(ctx context.Context, req domain.BulkSendRequest) ([]*domain.Notification, []error)
@@ -156,7 +143,7 @@ func (s *notificationService) Cancel(ctx context.Context, id uuid.UUID) (*domain
 }
 
 func (s *notificationService) enqueue(ctx context.Context, n *domain.Notification) error {
-	msg := NotificationMessage{
+	msg := queue.Message{
 		NotificationID:   n.ID,
 		Channel:          n.Channel,
 		RecipientID:      n.RecipientID,
@@ -174,6 +161,5 @@ func (s *notificationService) enqueue(ctx context.Context, n *domain.Notificatio
 		return fmt.Errorf("marshal notification message: %w", err)
 	}
 
-	topic := fmt.Sprintf("notifyhub.notifications.%s", n.Channel)
-	return s.publisher.Publish(ctx, topic, n.RecipientID, data)
+	return s.publisher.Publish(ctx, queue.TopicForChannel(n.Channel), n.RecipientID, data)
 }

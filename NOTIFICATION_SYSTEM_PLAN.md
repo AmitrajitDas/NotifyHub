@@ -143,6 +143,46 @@ notifyhub/
 
 ---
 
+## Multi-Tenancy Design
+
+NotifyHub supports both **single-tenant** and **multi-tenant** deployments from the same codebase. The schema always includes `tenant_id`, but a single-tenant deployment simply seeds one default tenant and never thinks about it again.
+
+### Tenancy model
+
+- **Tenant** — a top-level organization or deployment unit. In single-tenant mode, one row exists and all API clients belong to it.
+- **API client** — belongs to exactly one tenant. Auth middleware resolves the API key to an `APIClient` struct that carries `TenantID`.
+- **Data isolation** — every repository query filters by `tenant_id`. No cross-tenant reads are possible through the public API.
+- **Single-tenant shortcut** — set `TENANT_MODE=single` in config. The API server auto-resolves `tenant_id` from the single seeded tenant; callers never pass it explicitly.
+
+### Impact on components
+
+| Component | Change |
+|---|---|
+| `api_clients` table | Add `tenant_id FK` |
+| `templates` table | Add `tenant_id FK`; `UNIQUE(tenant_id, name)` |
+| `preferences` table | Add `tenant_id`; `UNIQUE(tenant_id, user_id, channel)` |
+| `notifications` table | Add `tenant_id FK`; `UNIQUE(tenant_id, idempotency_key)` |
+| `APIClient` domain type | Add `TenantID uuid.UUID` field |
+| Auth middleware | Populate `TenantID` from resolved API client and store in `context.Context` |
+| All repository methods | Accept `tenantID uuid.UUID`; add `WHERE tenant_id = $n` to every query |
+| Rate-limit Redis keys | `ratelimit:{tenant_id}:{user_id}:{channel}` |
+| Idempotency Redis keys | `idempotency:{tenant_id}:{idempotency_key}` |
+| Kafka message payload | Include `tenant_id` field |
+| Prometheus metrics | Add `tenant` label (use tenant name, not UUID) |
+| Structured logs | Include `tenant_id` in every log line |
+
+### Tenant provisioning
+
+Tenant management is not exposed through the public API. Use:
+- `scripts/seed.go` to create the default tenant + first API key (both single- and multi-tenant)
+- A restricted internal endpoint (protected by `X-Admin-Token`) for multi-tenant production use:
+  ```
+  POST /internal/tenants              # Create tenant
+  POST /internal/tenants/:id/api-keys # Issue API key for a tenant
+  ```
+
+---
+
 ## Database Schema (PostgreSQL)
 
 Create these as the initial migration `000001_init.up.sql`:
@@ -151,9 +191,19 @@ Create these as the initial migration `000001_init.up.sql`:
 -- Enable UUID generation
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- API clients
+-- Tenants (one row in single-tenant mode; many rows in multi-tenant mode)
+CREATE TABLE tenants (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(255) NOT NULL UNIQUE,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- API clients (each client belongs to one tenant)
 CREATE TABLE api_clients (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id),
     name VARCHAR(255) NOT NULL,
     api_key_hash VARCHAR(255) NOT NULL UNIQUE,
     is_active BOOLEAN NOT NULL DEFAULT true,
@@ -161,10 +211,13 @@ CREATE TABLE api_clients (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Notification templates
+CREATE INDEX idx_api_clients_tenant ON api_clients(tenant_id);
+
+-- Notification templates (scoped per tenant)
 CREATE TABLE templates (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    name VARCHAR(255) NOT NULL UNIQUE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id),
+    name VARCHAR(255) NOT NULL,
     channel VARCHAR(50) NOT NULL, -- 'email', 'push', 'sms', 'inapp'
     subject_template TEXT, -- for email
     body_template TEXT NOT NULL,
@@ -172,15 +225,17 @@ CREATE TABLE templates (
     version INT NOT NULL DEFAULT 1,
     is_active BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(tenant_id, name)
 );
 
-CREATE INDEX idx_templates_channel ON templates(channel);
-CREATE INDEX idx_templates_name ON templates(name);
+CREATE INDEX idx_templates_tenant ON templates(tenant_id);
+CREATE INDEX idx_templates_channel ON templates(tenant_id, channel);
 
--- User notification preferences
+-- User notification preferences (scoped per tenant)
 CREATE TABLE preferences (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id),
     user_id VARCHAR(255) NOT NULL,
     channel VARCHAR(50) NOT NULL,
     enabled BOOLEAN NOT NULL DEFAULT true,
@@ -191,16 +246,17 @@ CREATE TABLE preferences (
     timezone VARCHAR(100) DEFAULT 'UTC',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(user_id, channel)
+    UNIQUE(tenant_id, user_id, channel)
 );
 
-CREATE INDEX idx_preferences_user ON preferences(user_id);
+CREATE INDEX idx_preferences_tenant_user ON preferences(tenant_id, user_id);
 
--- Notifications (the core table)
+-- Notifications (the core table, scoped per tenant)
 CREATE TABLE notifications (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    idempotency_key VARCHAR(255) UNIQUE, -- prevent duplicates
-    type VARCHAR(100) NOT NULL, -- 'claim_status', 'policy_renewal', etc.
+    tenant_id UUID NOT NULL REFERENCES tenants(id),
+    idempotency_key VARCHAR(255), -- unique within a tenant
+    type VARCHAR(100) NOT NULL,
     channel VARCHAR(50) NOT NULL,
     recipient_id VARCHAR(255) NOT NULL,
     recipient_address VARCHAR(500), -- email/phone/device_token
@@ -211,13 +267,13 @@ CREATE TABLE notifications (
         -- pending -> queued -> processing -> delivered / failed / dropped
     scheduled_at TIMESTAMPTZ, -- NULL = send immediately
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(tenant_id, idempotency_key)
 );
 
-CREATE INDEX idx_notifications_status ON notifications(status);
-CREATE INDEX idx_notifications_recipient ON notifications(recipient_id);
+CREATE INDEX idx_notifications_tenant_status ON notifications(tenant_id, status);
+CREATE INDEX idx_notifications_tenant_recipient ON notifications(tenant_id, recipient_id);
 CREATE INDEX idx_notifications_scheduled ON notifications(scheduled_at) WHERE scheduled_at IS NOT NULL AND status = 'pending';
-CREATE INDEX idx_notifications_idempotency ON notifications(idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE INDEX idx_notifications_created ON notifications(created_at);
 
 -- Delivery attempts log

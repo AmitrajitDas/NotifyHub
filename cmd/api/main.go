@@ -19,6 +19,7 @@ import (
 	"github.com/amitrajitdas31/notifyhub/internal/api/handler"
 	"github.com/amitrajitdas31/notifyhub/internal/config"
 	"github.com/amitrajitdas31/notifyhub/internal/db"
+	"github.com/amitrajitdas31/notifyhub/internal/queue"
 	"github.com/amitrajitdas31/notifyhub/internal/repository"
 	"github.com/amitrajitdas31/notifyhub/internal/service"
 )
@@ -73,8 +74,13 @@ func main() {
 	templateRepo := repository.NewTemplateRepository(queries)
 	preferenceRepo := repository.NewPreferenceRepository(queries)
 
-	// 7. No-op publisher (Kafka not required to run the API)
-	publisher := &noopPublisher{log: logger}
+	// 7. Kafka producer
+	publisher := queue.NewProducer(cfg.KafkaBrokers, logger)
+	defer func() {
+		if err := publisher.Close(); err != nil {
+			logger.Error("producer close error", "error", err)
+		}
+	}()
 
 	// 8. Services
 	validate := validator.New()
@@ -169,13 +175,3 @@ func buildPool(cfg *config.Config) (*pgxpool.Pool, error) {
 	return pool, nil
 }
 
-// noopPublisher implements service.Publisher without requiring Kafka.
-// Replace with queue.NewKafkaPublisher(...) once the queue layer is built.
-type noopPublisher struct {
-	log *slog.Logger
-}
-
-func (p *noopPublisher) Publish(_ context.Context, topic, key string, _ []byte) error {
-	p.log.Info("noop publish — kafka not configured", "topic", topic, "key", key)
-	return nil
-}

@@ -79,14 +79,12 @@ func (s *notificationService) Send(ctx context.Context, req domain.SendRequest) 
 	}
 
 	// Publish to channel topic.
+	// If this fails, the notification stays pending so the scheduler can rescue it.
 	if err := s.enqueue(ctx, n); err != nil {
-		// Non-fatal: notification is persisted; the scheduler/reconciler can retry.
-		// Log the error but don't fail the API response.
-		_ = err
-		return n, nil
+		return nil, fmt.Errorf("enqueue notification: %w", err)
 	}
 
-	// Mark as queued.
+	// Mark as queued only after successful publish.
 	n, err = s.repo.UpdateStatus(ctx, n.ID, domain.StatusQueued)
 	if err != nil {
 		return nil, err

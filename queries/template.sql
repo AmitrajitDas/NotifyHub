@@ -1,32 +1,37 @@
 -- name: InsertTemplate :one
 INSERT INTO templates (
+    tenant_id,
     name,
     channel,
     subject_template,
     body_template,
     metadata
 ) VALUES (
-    $1, $2, $3, $4, $5
+    $1, $2, $3, $4, $5, $6
 )
 RETURNING *;
 
 -- name: GetTemplateByID :one
 SELECT * FROM templates
-WHERE id = $1;
+WHERE id = $1 AND tenant_id = $2;
 
 -- name: GetTemplateByName :one
 SELECT * FROM templates
-WHERE name = $1 AND is_active = true;
+WHERE name = $1 AND tenant_id = $2 AND is_active = true;
 
 -- name: ListTemplates :many
 SELECT * FROM templates
-WHERE (sqlc.arg(channel)::text = '' OR channel = sqlc.arg(channel))
+WHERE
+    tenant_id = sqlc.arg(tenant_id) AND
+    (sqlc.arg(channel)::text = '' OR channel = sqlc.arg(channel))
 ORDER BY name ASC
 LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
 
 -- name: CountTemplates :one
 SELECT COUNT(*) FROM templates
-WHERE (sqlc.arg(channel)::text = '' OR channel = sqlc.arg(channel));
+WHERE
+    tenant_id = sqlc.arg(tenant_id) AND
+    (sqlc.arg(channel)::text = '' OR channel = sqlc.arg(channel));
 
 -- name: UpdateTemplate :one
 UPDATE templates
@@ -37,11 +42,11 @@ SET
     is_active        = COALESCE($5, is_active),
     version          = version + 1,
     updated_at       = NOW()
-WHERE id = $1
+WHERE id = $1 AND tenant_id = $6
 RETURNING *;
 
 -- name: DeleteTemplate :one
 UPDATE templates
 SET is_active = false, updated_at = NOW()
-WHERE id = $1
+WHERE id = $1 AND tenant_id = $2
 RETURNING *;

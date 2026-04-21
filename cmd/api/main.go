@@ -70,6 +70,7 @@ func main() {
 
 	// 6. Repositories
 	apiClientRepo := repository.NewAPIClientRepository(queries)
+	tenantRepo := repository.NewTenantRepository(queries)
 	notifRepo := repository.NewNotificationRepository(queries)
 	templateRepo := repository.NewTemplateRepository(queries)
 	preferenceRepo := repository.NewPreferenceRepository(queries)
@@ -84,6 +85,7 @@ func main() {
 
 	// 8. Services
 	validate := validator.New()
+	tenantSvc := service.NewTenantService(tenantRepo, apiClientRepo, validate)
 	templateSvc := service.NewTemplateService(templateRepo, validate)
 	preferenceSvc := service.NewPreferenceService(preferenceRepo, validate)
 	notifSvc := service.NewNotificationService(notifRepo, publisher, validate, cfg.WorkerRetryMaxAttempts)
@@ -93,15 +95,18 @@ func main() {
 	templateHandler := handler.NewTemplateHandler(templateSvc)
 	prefHandler := handler.NewPreferenceHandler(preferenceSvc)
 	healthHandler := handler.NewHealthHandler(pool, redisClient)
+	tenantHandler := handler.NewTenantHandler(tenantSvc)
 
 	// 10. Router
 	router := api.NewRouter(api.RouterDeps{
 		Auth:         apiClientRepo,
+		AdminToken:   cfg.AdminToken,
 		Logger:       logger,
 		Notification: notifHandler,
 		Template:     templateHandler,
 		Preference:   prefHandler,
 		Health:       healthHandler,
+		Tenant:       tenantHandler,
 	})
 
 	// 11. HTTP server
@@ -174,4 +179,3 @@ func buildPool(cfg *config.Config) (*pgxpool.Pool, error) {
 	}
 	return pool, nil
 }
-

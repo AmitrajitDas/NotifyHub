@@ -22,9 +22,10 @@ func NewPreferenceHandler(svc service.PreferenceService) *PreferenceHandler {
 // GET /api/v1/users/:user_id/preferences
 func (h *PreferenceHandler) ListByUser(w http.ResponseWriter, r *http.Request) {
 	reqID := middleware.RequestIDFromContext(r.Context())
+	tenantID := middleware.ClientFromContext(r.Context()).TenantID
 	userID := chi.URLParam(r, "user_id")
 
-	prefs, err := h.svc.ListByUser(r.Context(), userID)
+	prefs, err := h.svc.ListByUser(r.Context(), tenantID, userID)
 	if appErr := toAppError(err); appErr != nil {
 		response.JSONError(w, appErr, reqID)
 		return
@@ -36,6 +37,7 @@ func (h *PreferenceHandler) ListByUser(w http.ResponseWriter, r *http.Request) {
 // PUT /api/v1/users/:user_id/preferences/:channel
 func (h *PreferenceHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 	reqID := middleware.RequestIDFromContext(r.Context())
+	tenantID := middleware.ClientFromContext(r.Context()).TenantID
 	userID := chi.URLParam(r, "user_id")
 	channel := domain.Channel(chi.URLParam(r, "channel"))
 
@@ -52,7 +54,7 @@ func (h *PreferenceHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pref, err := h.svc.Upsert(r.Context(), userID, channel, req)
+	pref, err := h.svc.Upsert(r.Context(), tenantID, userID, channel, req)
 	if appErr := toAppError(err); appErr != nil {
 		response.JSONError(w, appErr, reqID)
 		return
@@ -64,6 +66,7 @@ func (h *PreferenceHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 // DELETE /api/v1/users/:user_id/preferences/:channel
 func (h *PreferenceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	reqID := middleware.RequestIDFromContext(r.Context())
+	tenantID := middleware.ClientFromContext(r.Context()).TenantID
 	userID := chi.URLParam(r, "user_id")
 	channel := domain.Channel(chi.URLParam(r, "channel"))
 
@@ -74,7 +77,7 @@ func (h *PreferenceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.svc.Delete(r.Context(), userID, channel); err != nil {
+	if err := h.svc.Delete(r.Context(), tenantID, userID, channel); err != nil {
 		if appErr := toAppError(err); appErr != nil {
 			response.JSONError(w, appErr, reqID)
 			return

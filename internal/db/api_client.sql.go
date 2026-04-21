@@ -7,19 +7,33 @@ package db
 
 import (
 	"context"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 const getAPIClientByKeyHash = `-- name: GetAPIClientByKeyHash :one
-SELECT id, name, api_key_hash, is_active, created_at, updated_at
+SELECT id, tenant_id, name, api_key_hash, is_active, created_at, updated_at
 FROM api_clients
 WHERE api_key_hash = $1 AND is_active = true
 `
 
-func (q *Queries) GetAPIClientByKeyHash(ctx context.Context, apiKeyHash string) (ApiClient, error) {
+type GetAPIClientByKeyHashRow struct {
+	ID         uuid.UUID     `json:"id"`
+	TenantID   uuid.NullUUID `json:"tenant_id"`
+	Name       string        `json:"name"`
+	ApiKeyHash string        `json:"api_key_hash"`
+	IsActive   bool          `json:"is_active"`
+	CreatedAt  time.Time     `json:"created_at"`
+	UpdatedAt  time.Time     `json:"updated_at"`
+}
+
+func (q *Queries) GetAPIClientByKeyHash(ctx context.Context, apiKeyHash string) (GetAPIClientByKeyHashRow, error) {
 	row := q.db.QueryRowContext(ctx, getAPIClientByKeyHash, apiKeyHash)
-	var i ApiClient
+	var i GetAPIClientByKeyHashRow
 	err := row.Scan(
 		&i.ID,
+		&i.TenantID,
 		&i.Name,
 		&i.ApiKeyHash,
 		&i.IsActive,
@@ -30,21 +44,33 @@ func (q *Queries) GetAPIClientByKeyHash(ctx context.Context, apiKeyHash string) 
 }
 
 const insertAPIClient = `-- name: InsertAPIClient :one
-INSERT INTO api_clients (name, api_key_hash)
-VALUES ($1, $2)
-RETURNING id, name, api_key_hash, is_active, created_at, updated_at
+INSERT INTO api_clients (tenant_id, name, api_key_hash)
+VALUES ($1, $2, $3)
+RETURNING id, tenant_id, name, api_key_hash, is_active, created_at, updated_at
 `
 
 type InsertAPIClientParams struct {
-	Name       string `json:"name"`
-	ApiKeyHash string `json:"api_key_hash"`
+	TenantID   uuid.NullUUID `json:"tenant_id"`
+	Name       string        `json:"name"`
+	ApiKeyHash string        `json:"api_key_hash"`
 }
 
-func (q *Queries) InsertAPIClient(ctx context.Context, arg InsertAPIClientParams) (ApiClient, error) {
-	row := q.db.QueryRowContext(ctx, insertAPIClient, arg.Name, arg.ApiKeyHash)
-	var i ApiClient
+type InsertAPIClientRow struct {
+	ID         uuid.UUID     `json:"id"`
+	TenantID   uuid.NullUUID `json:"tenant_id"`
+	Name       string        `json:"name"`
+	ApiKeyHash string        `json:"api_key_hash"`
+	IsActive   bool          `json:"is_active"`
+	CreatedAt  time.Time     `json:"created_at"`
+	UpdatedAt  time.Time     `json:"updated_at"`
+}
+
+func (q *Queries) InsertAPIClient(ctx context.Context, arg InsertAPIClientParams) (InsertAPIClientRow, error) {
+	row := q.db.QueryRowContext(ctx, insertAPIClient, arg.TenantID, arg.Name, arg.ApiKeyHash)
+	var i InsertAPIClientRow
 	err := row.Scan(
 		&i.ID,
+		&i.TenantID,
 		&i.Name,
 		&i.ApiKeyHash,
 		&i.IsActive,

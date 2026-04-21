@@ -24,6 +24,7 @@ func NewTemplateHandler(svc service.TemplateService) *TemplateHandler {
 // POST /api/v1/templates
 func (h *TemplateHandler) Create(w http.ResponseWriter, r *http.Request) {
 	reqID := middleware.RequestIDFromContext(r.Context())
+	tenantID := middleware.ClientFromContext(r.Context()).TenantID
 
 	var req domain.CreateTemplateRequest
 	if appErr := response.DecodeJSON(r, &req); appErr != nil {
@@ -31,7 +32,7 @@ func (h *TemplateHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	t, err := h.svc.Create(r.Context(), req)
+	t, err := h.svc.Create(r.Context(), tenantID, req)
 	if appErr := toAppError(err); appErr != nil {
 		response.JSONError(w, appErr, reqID)
 		return
@@ -43,6 +44,7 @@ func (h *TemplateHandler) Create(w http.ResponseWriter, r *http.Request) {
 // GET /api/v1/templates
 func (h *TemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 	reqID := middleware.RequestIDFromContext(r.Context())
+	tenantID := middleware.ClientFromContext(r.Context()).TenantID
 
 	q := r.URL.Query()
 	page, _ := strconv.Atoi(q.Get("page"))
@@ -54,7 +56,7 @@ func (h *TemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 		perPage = 20
 	}
 
-	templates, total, err := h.svc.List(r.Context(), domain.Channel(q.Get("channel")), page, perPage)
+	templates, total, err := h.svc.List(r.Context(), tenantID, domain.Channel(q.Get("channel")), page, perPage)
 	if appErr := toAppError(err); appErr != nil {
 		response.JSONError(w, appErr, reqID)
 		return
@@ -66,6 +68,7 @@ func (h *TemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 // GET /api/v1/templates/:id
 func (h *TemplateHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	reqID := middleware.RequestIDFromContext(r.Context())
+	tenantID := middleware.ClientFromContext(r.Context()).TenantID
 
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -73,7 +76,7 @@ func (h *TemplateHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	t, svcErr := h.svc.GetByID(r.Context(), id)
+	t, svcErr := h.svc.GetByID(r.Context(), tenantID, id)
 	if appErr := toAppError(svcErr); appErr != nil {
 		response.JSONError(w, appErr, reqID)
 		return
@@ -85,6 +88,7 @@ func (h *TemplateHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 // PUT /api/v1/templates/:id
 func (h *TemplateHandler) Update(w http.ResponseWriter, r *http.Request) {
 	reqID := middleware.RequestIDFromContext(r.Context())
+	tenantID := middleware.ClientFromContext(r.Context()).TenantID
 
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -98,7 +102,7 @@ func (h *TemplateHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	t, svcErr := h.svc.Update(r.Context(), id, req)
+	t, svcErr := h.svc.Update(r.Context(), tenantID, id, req)
 	if appErr := toAppError(svcErr); appErr != nil {
 		response.JSONError(w, appErr, reqID)
 		return
@@ -110,6 +114,7 @@ func (h *TemplateHandler) Update(w http.ResponseWriter, r *http.Request) {
 // DELETE /api/v1/templates/:id
 func (h *TemplateHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	reqID := middleware.RequestIDFromContext(r.Context())
+	tenantID := middleware.ClientFromContext(r.Context()).TenantID
 
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -117,7 +122,7 @@ func (h *TemplateHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	t, svcErr := h.svc.Delete(r.Context(), id)
+	t, svcErr := h.svc.Delete(r.Context(), tenantID, id)
 	if appErr := toAppError(svcErr); appErr != nil {
 		response.JSONError(w, appErr, reqID)
 		return
@@ -129,6 +134,7 @@ func (h *TemplateHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // POST /api/v1/templates/:id/preview
 func (h *TemplateHandler) Preview(w http.ResponseWriter, r *http.Request) {
 	reqID := middleware.RequestIDFromContext(r.Context())
+	tenantID := middleware.ClientFromContext(r.Context()).TenantID
 
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -142,7 +148,7 @@ func (h *TemplateHandler) Preview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	preview, svcErr := h.svc.Preview(r.Context(), id, req)
+	preview, svcErr := h.svc.Preview(r.Context(), tenantID, id, req)
 	if appErr := toAppError(svcErr); appErr != nil {
 		response.JSONError(w, appErr, reqID)
 		return

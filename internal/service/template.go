@@ -15,14 +15,14 @@ import (
 
 // TemplateService defines business logic for notification templates.
 type TemplateService interface {
-	Create(ctx context.Context, req domain.CreateTemplateRequest) (*domain.Template, error)
-	GetByID(ctx context.Context, id uuid.UUID) (*domain.Template, error)
-	GetByName(ctx context.Context, name string) (*domain.Template, error)
-	List(ctx context.Context, channel domain.Channel, page, perPage int) ([]domain.Template, int64, error)
-	Update(ctx context.Context, id uuid.UUID, req domain.UpdateTemplateRequest) (*domain.Template, error)
-	Delete(ctx context.Context, id uuid.UUID) (*domain.Template, error)
-	Preview(ctx context.Context, id uuid.UUID, req domain.PreviewTemplateRequest) (*domain.PreviewTemplateResponse, error)
-	Render(ctx context.Context, templateID uuid.UUID, payload map[string]any) (subject, body string, err error)
+	Create(ctx context.Context, tenantID uuid.UUID, req domain.CreateTemplateRequest) (*domain.Template, error)
+	GetByID(ctx context.Context, tenantID uuid.UUID, id uuid.UUID) (*domain.Template, error)
+	GetByName(ctx context.Context, tenantID uuid.UUID, name string) (*domain.Template, error)
+	List(ctx context.Context, tenantID uuid.UUID, channel domain.Channel, page, perPage int) ([]domain.Template, int64, error)
+	Update(ctx context.Context, tenantID uuid.UUID, id uuid.UUID, req domain.UpdateTemplateRequest) (*domain.Template, error)
+	Delete(ctx context.Context, tenantID uuid.UUID, id uuid.UUID) (*domain.Template, error)
+	Preview(ctx context.Context, tenantID uuid.UUID, id uuid.UUID, req domain.PreviewTemplateRequest) (*domain.PreviewTemplateResponse, error)
+	Render(ctx context.Context, tenantID uuid.UUID, templateID uuid.UUID, payload map[string]any) (subject, body string, err error)
 }
 
 type templateService struct {
@@ -34,42 +34,42 @@ func NewTemplateService(repo repository.TemplateRepository, v *validator.Validat
 	return &templateService{repo: repo, validator: v}
 }
 
-func (s *templateService) Create(ctx context.Context, req domain.CreateTemplateRequest) (*domain.Template, error) {
+func (s *templateService) Create(ctx context.Context, tenantID uuid.UUID, req domain.CreateTemplateRequest) (*domain.Template, error) {
 	if err := s.validator.StructCtx(ctx, req); err != nil {
 		return nil, toValidationError(err)
 	}
-	return s.repo.Create(ctx, req)
+	return s.repo.Create(ctx, tenantID, req)
 }
 
-func (s *templateService) GetByID(ctx context.Context, id uuid.UUID) (*domain.Template, error) {
-	return s.repo.GetByID(ctx, id)
+func (s *templateService) GetByID(ctx context.Context, tenantID uuid.UUID, id uuid.UUID) (*domain.Template, error) {
+	return s.repo.GetByID(ctx, tenantID, id)
 }
 
-func (s *templateService) GetByName(ctx context.Context, name string) (*domain.Template, error) {
-	return s.repo.GetByName(ctx, name)
+func (s *templateService) GetByName(ctx context.Context, tenantID uuid.UUID, name string) (*domain.Template, error) {
+	return s.repo.GetByName(ctx, tenantID, name)
 }
 
-func (s *templateService) List(ctx context.Context, channel domain.Channel, page, perPage int) ([]domain.Template, int64, error) {
-	return s.repo.List(ctx, channel, page, perPage)
+func (s *templateService) List(ctx context.Context, tenantID uuid.UUID, channel domain.Channel, page, perPage int) ([]domain.Template, int64, error) {
+	return s.repo.List(ctx, tenantID, channel, page, perPage)
 }
 
-func (s *templateService) Update(ctx context.Context, id uuid.UUID, req domain.UpdateTemplateRequest) (*domain.Template, error) {
+func (s *templateService) Update(ctx context.Context, tenantID uuid.UUID, id uuid.UUID, req domain.UpdateTemplateRequest) (*domain.Template, error) {
 	if err := s.validator.StructCtx(ctx, req); err != nil {
 		return nil, toValidationError(err)
 	}
-	return s.repo.Update(ctx, id, req)
+	return s.repo.Update(ctx, tenantID, id, req)
 }
 
-func (s *templateService) Delete(ctx context.Context, id uuid.UUID) (*domain.Template, error) {
-	return s.repo.Delete(ctx, id)
+func (s *templateService) Delete(ctx context.Context, tenantID uuid.UUID, id uuid.UUID) (*domain.Template, error) {
+	return s.repo.Delete(ctx, tenantID, id)
 }
 
-func (s *templateService) Preview(ctx context.Context, id uuid.UUID, req domain.PreviewTemplateRequest) (*domain.PreviewTemplateResponse, error) {
+func (s *templateService) Preview(ctx context.Context, tenantID uuid.UUID, id uuid.UUID, req domain.PreviewTemplateRequest) (*domain.PreviewTemplateResponse, error) {
 	if err := s.validator.StructCtx(ctx, req); err != nil {
 		return nil, toValidationError(err)
 	}
 
-	tmpl, err := s.repo.GetByID(ctx, id)
+	tmpl, err := s.repo.GetByID(ctx, tenantID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -92,8 +92,8 @@ func (s *templateService) Preview(ctx context.Context, id uuid.UUID, req domain.
 	return resp, nil
 }
 
-func (s *templateService) Render(ctx context.Context, templateID uuid.UUID, payload map[string]any) (subject, body string, err error) {
-	tmpl, err := s.repo.GetByID(ctx, templateID)
+func (s *templateService) Render(ctx context.Context, tenantID uuid.UUID, templateID uuid.UUID, payload map[string]any) (subject, body string, err error) {
+	tmpl, err := s.repo.GetByID(ctx, tenantID, templateID)
 	if err != nil {
 		return "", "", err
 	}

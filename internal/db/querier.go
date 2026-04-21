@@ -6,32 +6,34 @@ package db
 
 import (
 	"context"
-	"database/sql"
 
 	"github.com/google/uuid"
 )
 
 type Querier interface {
-	CancelNotification(ctx context.Context, id uuid.UUID) (Notification, error)
+	CancelNotification(ctx context.Context, arg CancelNotificationParams) (Notification, error)
 	CountNotifications(ctx context.Context, arg CountNotificationsParams) (int64, error)
-	CountTemplates(ctx context.Context, channel string) (int64, error)
+	CountTemplates(ctx context.Context, arg CountTemplatesParams) (int64, error)
 	DeletePreference(ctx context.Context, arg DeletePreferenceParams) error
-	DeleteTemplate(ctx context.Context, id uuid.UUID) (Template, error)
-	GetAPIClientByKeyHash(ctx context.Context, apiKeyHash string) (ApiClient, error)
+	DeleteTemplate(ctx context.Context, arg DeleteTemplateParams) (Template, error)
+	GetAPIClientByKeyHash(ctx context.Context, apiKeyHash string) (GetAPIClientByKeyHashRow, error)
 	GetLatestDeliveryLog(ctx context.Context, notificationID uuid.UUID) (DeliveryLog, error)
-	GetNotificationByID(ctx context.Context, id uuid.UUID) (Notification, error)
-	GetNotificationByIdempotencyKey(ctx context.Context, idempotencyKey sql.NullString) (Notification, error)
+	GetNotificationByID(ctx context.Context, arg GetNotificationByIDParams) (Notification, error)
+	GetNotificationByIdempotencyKey(ctx context.Context, arg GetNotificationByIdempotencyKeyParams) (Notification, error)
 	GetPreference(ctx context.Context, arg GetPreferenceParams) (Preference, error)
-	GetTemplateByID(ctx context.Context, id uuid.UUID) (Template, error)
-	GetTemplateByName(ctx context.Context, name string) (Template, error)
-	InsertAPIClient(ctx context.Context, arg InsertAPIClientParams) (ApiClient, error)
+	GetTemplateByID(ctx context.Context, arg GetTemplateByIDParams) (Template, error)
+	GetTemplateByName(ctx context.Context, arg GetTemplateByNameParams) (Template, error)
+	GetTenantByID(ctx context.Context, id uuid.UUID) (Tenant, error)
+	GetTenantByName(ctx context.Context, name string) (Tenant, error)
+	InsertAPIClient(ctx context.Context, arg InsertAPIClientParams) (InsertAPIClientRow, error)
 	InsertDeliveryLog(ctx context.Context, arg InsertDeliveryLogParams) (DeliveryLog, error)
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (Notification, error)
 	InsertTemplate(ctx context.Context, arg InsertTemplateParams) (Template, error)
+	InsertTenant(ctx context.Context, name string) (Tenant, error)
 	ListDeliveryLogsByNotification(ctx context.Context, notificationID uuid.UUID) ([]DeliveryLog, error)
 	ListDueScheduledNotifications(ctx context.Context, limit int32) ([]Notification, error)
 	ListNotifications(ctx context.Context, arg ListNotificationsParams) ([]Notification, error)
-	ListPreferencesByUser(ctx context.Context, userID string) ([]Preference, error)
+	ListPreferencesByUser(ctx context.Context, arg ListPreferencesByUserParams) ([]Preference, error)
 	ListTemplates(ctx context.Context, arg ListTemplatesParams) ([]Template, error)
 	UpdateNotificationStatus(ctx context.Context, arg UpdateNotificationStatusParams) (Notification, error)
 	UpdateTemplate(ctx context.Context, arg UpdateTemplateParams) (Template, error)

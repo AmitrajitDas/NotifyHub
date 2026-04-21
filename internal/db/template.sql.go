@@ -15,11 +15,18 @@ import (
 
 const countTemplates = `-- name: CountTemplates :one
 SELECT COUNT(*) FROM templates
-WHERE ($1::text = '' OR channel = $1)
+WHERE
+    tenant_id = $1 AND
+    ($2::text = '' OR channel = $2)
 `
 
-func (q *Queries) CountTemplates(ctx context.Context, channel string) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countTemplates, channel)
+type CountTemplatesParams struct {
+	TenantID uuid.NullUUID `json:"tenant_id"`
+	Channel  string        `json:"channel"`
+}
+
+func (q *Queries) CountTemplates(ctx context.Context, arg CountTemplatesParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countTemplates, arg.TenantID, arg.Channel)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -28,12 +35,17 @@ func (q *Queries) CountTemplates(ctx context.Context, channel string) (int64, er
 const deleteTemplate = `-- name: DeleteTemplate :one
 UPDATE templates
 SET is_active = false, updated_at = NOW()
-WHERE id = $1
-RETURNING id, name, channel, subject_template, body_template, metadata, version, is_active, created_at, updated_at
+WHERE id = $1 AND tenant_id = $2
+RETURNING id, name, channel, subject_template, body_template, metadata, version, is_active, created_at, updated_at, tenant_id
 `
 
-func (q *Queries) DeleteTemplate(ctx context.Context, id uuid.UUID) (Template, error) {
-	row := q.db.QueryRowContext(ctx, deleteTemplate, id)
+type DeleteTemplateParams struct {
+	ID       uuid.UUID     `json:"id"`
+	TenantID uuid.NullUUID `json:"tenant_id"`
+}
+
+func (q *Queries) DeleteTemplate(ctx context.Context, arg DeleteTemplateParams) (Template, error) {
+	row := q.db.QueryRowContext(ctx, deleteTemplate, arg.ID, arg.TenantID)
 	var i Template
 	err := row.Scan(
 		&i.ID,
@@ -46,17 +58,23 @@ func (q *Queries) DeleteTemplate(ctx context.Context, id uuid.UUID) (Template, e
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const getTemplateByID = `-- name: GetTemplateByID :one
-SELECT id, name, channel, subject_template, body_template, metadata, version, is_active, created_at, updated_at FROM templates
-WHERE id = $1
+SELECT id, name, channel, subject_template, body_template, metadata, version, is_active, created_at, updated_at, tenant_id FROM templates
+WHERE id = $1 AND tenant_id = $2
 `
 
-func (q *Queries) GetTemplateByID(ctx context.Context, id uuid.UUID) (Template, error) {
-	row := q.db.QueryRowContext(ctx, getTemplateByID, id)
+type GetTemplateByIDParams struct {
+	ID       uuid.UUID     `json:"id"`
+	TenantID uuid.NullUUID `json:"tenant_id"`
+}
+
+func (q *Queries) GetTemplateByID(ctx context.Context, arg GetTemplateByIDParams) (Template, error) {
+	row := q.db.QueryRowContext(ctx, getTemplateByID, arg.ID, arg.TenantID)
 	var i Template
 	err := row.Scan(
 		&i.ID,
@@ -69,17 +87,23 @@ func (q *Queries) GetTemplateByID(ctx context.Context, id uuid.UUID) (Template, 
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const getTemplateByName = `-- name: GetTemplateByName :one
-SELECT id, name, channel, subject_template, body_template, metadata, version, is_active, created_at, updated_at FROM templates
-WHERE name = $1 AND is_active = true
+SELECT id, name, channel, subject_template, body_template, metadata, version, is_active, created_at, updated_at, tenant_id FROM templates
+WHERE name = $1 AND tenant_id = $2 AND is_active = true
 `
 
-func (q *Queries) GetTemplateByName(ctx context.Context, name string) (Template, error) {
-	row := q.db.QueryRowContext(ctx, getTemplateByName, name)
+type GetTemplateByNameParams struct {
+	Name     string        `json:"name"`
+	TenantID uuid.NullUUID `json:"tenant_id"`
+}
+
+func (q *Queries) GetTemplateByName(ctx context.Context, arg GetTemplateByNameParams) (Template, error) {
+	row := q.db.QueryRowContext(ctx, getTemplateByName, arg.Name, arg.TenantID)
 	var i Template
 	err := row.Scan(
 		&i.ID,
@@ -92,24 +116,27 @@ func (q *Queries) GetTemplateByName(ctx context.Context, name string) (Template,
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const insertTemplate = `-- name: InsertTemplate :one
 INSERT INTO templates (
+    tenant_id,
     name,
     channel,
     subject_template,
     body_template,
     metadata
 ) VALUES (
-    $1, $2, $3, $4, $5
+    $1, $2, $3, $4, $5, $6
 )
-RETURNING id, name, channel, subject_template, body_template, metadata, version, is_active, created_at, updated_at
+RETURNING id, name, channel, subject_template, body_template, metadata, version, is_active, created_at, updated_at, tenant_id
 `
 
 type InsertTemplateParams struct {
+	TenantID        uuid.NullUUID         `json:"tenant_id"`
 	Name            string                `json:"name"`
 	Channel         string                `json:"channel"`
 	SubjectTemplate sql.NullString        `json:"subject_template"`
@@ -119,6 +146,7 @@ type InsertTemplateParams struct {
 
 func (q *Queries) InsertTemplate(ctx context.Context, arg InsertTemplateParams) (Template, error) {
 	row := q.db.QueryRowContext(ctx, insertTemplate,
+		arg.TenantID,
 		arg.Name,
 		arg.Channel,
 		arg.SubjectTemplate,
@@ -137,25 +165,34 @@ func (q *Queries) InsertTemplate(ctx context.Context, arg InsertTemplateParams) 
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const listTemplates = `-- name: ListTemplates :many
-SELECT id, name, channel, subject_template, body_template, metadata, version, is_active, created_at, updated_at FROM templates
-WHERE ($1::text = '' OR channel = $1)
+SELECT id, name, channel, subject_template, body_template, metadata, version, is_active, created_at, updated_at, tenant_id FROM templates
+WHERE
+    tenant_id = $1 AND
+    ($2::text = '' OR channel = $2)
 ORDER BY name ASC
-LIMIT $3 OFFSET $2
+LIMIT $4 OFFSET $3
 `
 
 type ListTemplatesParams struct {
-	Channel string `json:"channel"`
-	Offset  int32  `json:"offset"`
-	Limit   int32  `json:"limit"`
+	TenantID uuid.NullUUID `json:"tenant_id"`
+	Channel  string        `json:"channel"`
+	Offset   int32         `json:"offset"`
+	Limit    int32         `json:"limit"`
 }
 
 func (q *Queries) ListTemplates(ctx context.Context, arg ListTemplatesParams) ([]Template, error) {
-	rows, err := q.db.QueryContext(ctx, listTemplates, arg.Channel, arg.Offset, arg.Limit)
+	rows, err := q.db.QueryContext(ctx, listTemplates,
+		arg.TenantID,
+		arg.Channel,
+		arg.Offset,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -174,6 +211,7 @@ func (q *Queries) ListTemplates(ctx context.Context, arg ListTemplatesParams) ([
 			&i.IsActive,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -197,8 +235,8 @@ SET
     is_active        = COALESCE($5, is_active),
     version          = version + 1,
     updated_at       = NOW()
-WHERE id = $1
-RETURNING id, name, channel, subject_template, body_template, metadata, version, is_active, created_at, updated_at
+WHERE id = $1 AND tenant_id = $6
+RETURNING id, name, channel, subject_template, body_template, metadata, version, is_active, created_at, updated_at, tenant_id
 `
 
 type UpdateTemplateParams struct {
@@ -207,6 +245,7 @@ type UpdateTemplateParams struct {
 	BodyTemplate    string                `json:"body_template"`
 	Metadata        pqtype.NullRawMessage `json:"metadata"`
 	IsActive        bool                  `json:"is_active"`
+	TenantID        uuid.NullUUID         `json:"tenant_id"`
 }
 
 func (q *Queries) UpdateTemplate(ctx context.Context, arg UpdateTemplateParams) (Template, error) {
@@ -216,6 +255,7 @@ func (q *Queries) UpdateTemplate(ctx context.Context, arg UpdateTemplateParams) 
 		arg.BodyTemplate,
 		arg.Metadata,
 		arg.IsActive,
+		arg.TenantID,
 	)
 	var i Template
 	err := row.Scan(
@@ -229,6 +269,7 @@ func (q *Queries) UpdateTemplate(ctx context.Context, arg UpdateTemplateParams) 
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }

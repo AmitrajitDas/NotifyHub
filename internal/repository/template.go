@@ -13,13 +13,15 @@ import (
 
 // TemplateRepository defines DB operations for templates.
 type TemplateRepository interface {
-	Create(ctx context.Context, req domain.CreateTemplateRequest) (*domain.Template, error)
-	GetByID(ctx context.Context, id uuid.UUID) (*domain.Template, error)
-	GetByName(ctx context.Context, name string) (*domain.Template, error)
-	List(ctx context.Context, channel domain.Channel, page, perPage int) ([]domain.Template, int64, error)
-	Update(ctx context.Context, id uuid.UUID, req domain.UpdateTemplateRequest) (*domain.Template, error)
-	Delete(ctx context.Context, id uuid.UUID) (*domain.Template, error)
+	Create(ctx context.Context, tenantID uuid.UUID, req domain.CreateTemplateRequest) (*domain.Template, error)
+	GetByID(ctx context.Context, tenantID uuid.UUID, id uuid.UUID) (*domain.Template, error)
+	GetByName(ctx context.Context, tenantID uuid.UUID, name string) (*domain.Template, error)
+	List(ctx context.Context, tenantID uuid.UUID, channel domain.Channel, page, perPage int) ([]domain.Template, int64, error)
+	Update(ctx context.Context, tenantID uuid.UUID, id uuid.UUID, req domain.UpdateTemplateRequest) (*domain.Template, error)
+	Delete(ctx context.Context, tenantID uuid.UUID, id uuid.UUID) (*domain.Template, error)
 }
+
+const errTemplateNotFound = "template not found"
 
 type postgresTemplateRepo struct {
 	q *db.Queries
@@ -29,8 +31,9 @@ func NewTemplateRepository(q *db.Queries) TemplateRepository {
 	return &postgresTemplateRepo{q: q}
 }
 
-func (r *postgresTemplateRepo) Create(ctx context.Context, req domain.CreateTemplateRequest) (*domain.Template, error) {
+func (r *postgresTemplateRepo) Create(ctx context.Context, tenantID uuid.UUID, req domain.CreateTemplateRequest) (*domain.Template, error) {
 	row, err := r.q.InsertTemplate(ctx, db.InsertTemplateParams{
+		TenantID:        uuidToNullUUID(tenantID),
 		Name:            req.Name,
 		Channel:         string(req.Channel),
 		SubjectTemplate: toNullString(req.SubjectTemplate),
@@ -44,11 +47,14 @@ func (r *postgresTemplateRepo) Create(ctx context.Context, req domain.CreateTemp
 	return &t, nil
 }
 
-func (r *postgresTemplateRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Template, error) {
-	row, err := r.q.GetTemplateByID(ctx, id)
+func (r *postgresTemplateRepo) GetByID(ctx context.Context, tenantID uuid.UUID, id uuid.UUID) (*domain.Template, error) {
+	row, err := r.q.GetTemplateByID(ctx, db.GetTemplateByIDParams{
+		ID:       id,
+		TenantID: uuidToNullUUID(tenantID),
+	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, domain.NewNotFoundError("template not found")
+			return nil, domain.NewNotFoundError(errTemplateNotFound)
 		}
 		return nil, domain.NewInternalError("failed to get template", err)
 	}
@@ -56,11 +62,14 @@ func (r *postgresTemplateRepo) GetByID(ctx context.Context, id uuid.UUID) (*doma
 	return &t, nil
 }
 
-func (r *postgresTemplateRepo) GetByName(ctx context.Context, name string) (*domain.Template, error) {
-	row, err := r.q.GetTemplateByName(ctx, name)
+func (r *postgresTemplateRepo) GetByName(ctx context.Context, tenantID uuid.UUID, name string) (*domain.Template, error) {
+	row, err := r.q.GetTemplateByName(ctx, db.GetTemplateByNameParams{
+		Name:     name,
+		TenantID: uuidToNullUUID(tenantID),
+	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, domain.NewNotFoundError("template not found")
+			return nil, domain.NewNotFoundError(errTemplateNotFound)
 		}
 		return nil, domain.NewInternalError("failed to get template by name", err)
 	}
@@ -68,7 +77,7 @@ func (r *postgresTemplateRepo) GetByName(ctx context.Context, name string) (*dom
 	return &t, nil
 }
 
-func (r *postgresTemplateRepo) List(ctx context.Context, channel domain.Channel, page, perPage int) ([]domain.Template, int64, error) {
+func (r *postgresTemplateRepo) List(ctx context.Context, tenantID uuid.UUID, channel domain.Channel, page, perPage int) ([]domain.Template, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -76,16 +85,20 @@ func (r *postgresTemplateRepo) List(ctx context.Context, channel domain.Channel,
 		perPage = 20
 	}
 
-	channelStr := string(channel)
+	tID := uuidToNullUUID(tenantID)
 	rows, err := r.q.ListTemplates(ctx, db.ListTemplatesParams{
-		Channel: channelStr,
-		Offset:  int32((page - 1) * perPage),
-		Limit:   int32(perPage),
+		TenantID: tID,
+		Channel:  string(channel),
+		Offset:   int32((page - 1) * perPage),
+		Limit:    int32(perPage),
 	})
 	if err != nil {
 		return nil, 0, domain.NewInternalError("failed to list templates", err)
 	}
-	total, err := r.q.CountTemplates(ctx, channelStr)
+	total, err := r.q.CountTemplates(ctx, db.CountTemplatesParams{
+		TenantID: tID,
+		Channel:  string(channel),
+	})
 	if err != nil {
 		return nil, 0, domain.NewInternalError("failed to count templates", err)
 	}
@@ -98,10 +111,8 @@ func (r *postgresTemplateRepo) List(ctx context.Context, channel domain.Channel,
 }
 
 // Update applies a partial update. Fields that are nil in req are left unchanged.
-// Because the generated UpdateTemplateParams uses non-nullable types for BodyTemplate
-// and IsActive, we fetch the existing record first to fill any omitted fields.
-func (r *postgresTemplateRepo) Update(ctx context.Context, id uuid.UUID, req domain.UpdateTemplateRequest) (*domain.Template, error) {
-	existing, err := r.GetByID(ctx, id)
+func (r *postgresTemplateRepo) Update(ctx context.Context, tenantID uuid.UUID, id uuid.UUID, req domain.UpdateTemplateRequest) (*domain.Template, error) {
+	existing, err := r.GetByID(ctx, tenantID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -128,6 +139,7 @@ func (r *postgresTemplateRepo) Update(ctx context.Context, id uuid.UUID, req dom
 
 	row, err := r.q.UpdateTemplate(ctx, db.UpdateTemplateParams{
 		ID:              id,
+		TenantID:        uuidToNullUUID(tenantID),
 		SubjectTemplate: toNullString(subjectTemplate),
 		BodyTemplate:    bodyTemplate,
 		Metadata:        toNullRawMessage(metadata),
@@ -135,7 +147,7 @@ func (r *postgresTemplateRepo) Update(ctx context.Context, id uuid.UUID, req dom
 	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, domain.NewNotFoundError("template not found")
+			return nil, domain.NewNotFoundError(errTemplateNotFound)
 		}
 		return nil, domain.NewInternalError("failed to update template", err)
 	}
@@ -143,11 +155,14 @@ func (r *postgresTemplateRepo) Update(ctx context.Context, id uuid.UUID, req dom
 	return &t, nil
 }
 
-func (r *postgresTemplateRepo) Delete(ctx context.Context, id uuid.UUID) (*domain.Template, error) {
-	row, err := r.q.DeleteTemplate(ctx, id)
+func (r *postgresTemplateRepo) Delete(ctx context.Context, tenantID uuid.UUID, id uuid.UUID) (*domain.Template, error) {
+	row, err := r.q.DeleteTemplate(ctx, db.DeleteTemplateParams{
+		ID:       id,
+		TenantID: uuidToNullUUID(tenantID),
+	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, domain.NewNotFoundError("template not found")
+			return nil, domain.NewNotFoundError(errTemplateNotFound)
 		}
 		return nil, domain.NewInternalError("failed to delete template", err)
 	}

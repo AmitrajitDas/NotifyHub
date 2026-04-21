@@ -5,16 +5,18 @@ import (
 	"database/sql"
 	"errors"
 
+	"github.com/google/uuid"
+
 	"github.com/amitrajitdas31/notifyhub/internal/db"
 	"github.com/amitrajitdas31/notifyhub/internal/domain"
 )
 
 // PreferenceRepository defines DB operations for user notification preferences.
 type PreferenceRepository interface {
-	Get(ctx context.Context, userID string, channel domain.Channel) (*domain.Preference, error)
-	ListByUser(ctx context.Context, userID string) ([]domain.Preference, error)
-	Upsert(ctx context.Context, userID string, channel domain.Channel, req domain.UpsertPreferenceRequest) (*domain.Preference, error)
-	Delete(ctx context.Context, userID string, channel domain.Channel) error
+	Get(ctx context.Context, tenantID uuid.UUID, userID string, channel domain.Channel) (*domain.Preference, error)
+	ListByUser(ctx context.Context, tenantID uuid.UUID, userID string) ([]domain.Preference, error)
+	Upsert(ctx context.Context, tenantID uuid.UUID, userID string, channel domain.Channel, req domain.UpsertPreferenceRequest) (*domain.Preference, error)
+	Delete(ctx context.Context, tenantID uuid.UUID, userID string, channel domain.Channel) error
 }
 
 type postgresPreferenceRepo struct {
@@ -25,10 +27,11 @@ func NewPreferenceRepository(q *db.Queries) PreferenceRepository {
 	return &postgresPreferenceRepo{q: q}
 }
 
-func (r *postgresPreferenceRepo) Get(ctx context.Context, userID string, channel domain.Channel) (*domain.Preference, error) {
+func (r *postgresPreferenceRepo) Get(ctx context.Context, tenantID uuid.UUID, userID string, channel domain.Channel) (*domain.Preference, error) {
 	row, err := r.q.GetPreference(ctx, db.GetPreferenceParams{
-		UserID:  userID,
-		Channel: string(channel),
+		TenantID: uuidToNullUUID(tenantID),
+		UserID:   userID,
+		Channel:  string(channel),
 	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -40,8 +43,11 @@ func (r *postgresPreferenceRepo) Get(ctx context.Context, userID string, channel
 	return &p, nil
 }
 
-func (r *postgresPreferenceRepo) ListByUser(ctx context.Context, userID string) ([]domain.Preference, error) {
-	rows, err := r.q.ListPreferencesByUser(ctx, userID)
+func (r *postgresPreferenceRepo) ListByUser(ctx context.Context, tenantID uuid.UUID, userID string) ([]domain.Preference, error) {
+	rows, err := r.q.ListPreferencesByUser(ctx, db.ListPreferencesByUserParams{
+		TenantID: uuidToNullUUID(tenantID),
+		UserID:   userID,
+	})
 	if err != nil {
 		return nil, domain.NewInternalError("failed to list preferences", err)
 	}
@@ -52,17 +58,16 @@ func (r *postgresPreferenceRepo) ListByUser(ctx context.Context, userID string) 
 	return out, nil
 }
 
-func (r *postgresPreferenceRepo) Upsert(ctx context.Context, userID string, channel domain.Channel, req domain.UpsertPreferenceRequest) (*domain.Preference, error) {
-	freqWindow := toNullInt32(req.FrequencyWindowMinutes)
-
+func (r *postgresPreferenceRepo) Upsert(ctx context.Context, tenantID uuid.UUID, userID string, channel domain.Channel, req domain.UpsertPreferenceRequest) (*domain.Preference, error) {
 	row, err := r.q.UpsertPreference(ctx, db.UpsertPreferenceParams{
+		TenantID:               uuidToNullUUID(tenantID),
 		UserID:                 userID,
 		Channel:                string(channel),
 		Enabled:                req.Enabled,
 		QuietHoursStart:        toNullTimeFromTimeStr(req.QuietHoursStart),
 		QuietHoursEnd:          toNullTimeFromTimeStr(req.QuietHoursEnd),
 		FrequencyCap:           toNullInt32(req.FrequencyCap),
-		FrequencyWindowMinutes: freqWindow,
+		FrequencyWindowMinutes: toNullInt32(req.FrequencyWindowMinutes),
 		Timezone:               toNullString(req.Timezone),
 	})
 	if err != nil {
@@ -72,10 +77,11 @@ func (r *postgresPreferenceRepo) Upsert(ctx context.Context, userID string, chan
 	return &p, nil
 }
 
-func (r *postgresPreferenceRepo) Delete(ctx context.Context, userID string, channel domain.Channel) error {
+func (r *postgresPreferenceRepo) Delete(ctx context.Context, tenantID uuid.UUID, userID string, channel domain.Channel) error {
 	err := r.q.DeletePreference(ctx, db.DeletePreferenceParams{
-		UserID:  userID,
-		Channel: string(channel),
+		TenantID: uuidToNullUUID(tenantID),
+		UserID:   userID,
+		Channel:  string(channel),
 	})
 	if err != nil {
 		return domain.NewInternalError("failed to delete preference", err)

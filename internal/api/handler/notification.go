@@ -24,6 +24,7 @@ func NewNotificationHandler(svc service.NotificationService) *NotificationHandle
 // POST /api/v1/notifications
 func (h *NotificationHandler) Send(w http.ResponseWriter, r *http.Request) {
 	reqID := middleware.RequestIDFromContext(r.Context())
+	tenantID := middleware.ClientFromContext(r.Context()).TenantID
 
 	var req domain.SendRequest
 	if appErr := response.DecodeJSON(r, &req); appErr != nil {
@@ -31,7 +32,7 @@ func (h *NotificationHandler) Send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	n, err := h.svc.Send(r.Context(), req)
+	n, err := h.svc.Send(r.Context(), tenantID, req)
 	if appErr := toAppError(err); appErr != nil {
 		response.JSONError(w, appErr, reqID)
 		return
@@ -43,6 +44,7 @@ func (h *NotificationHandler) Send(w http.ResponseWriter, r *http.Request) {
 // POST /api/v1/notifications/bulk
 func (h *NotificationHandler) SendBulk(w http.ResponseWriter, r *http.Request) {
 	reqID := middleware.RequestIDFromContext(r.Context())
+	tenantID := middleware.ClientFromContext(r.Context()).TenantID
 
 	var req domain.BulkSendRequest
 	if appErr := response.DecodeJSON(r, &req); appErr != nil {
@@ -50,7 +52,7 @@ func (h *NotificationHandler) SendBulk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results, errs := h.svc.SendBulk(r.Context(), req)
+	results, errs := h.svc.SendBulk(r.Context(), tenantID, req)
 
 	// If everything failed and the first error is a known AppError, return 4xx.
 	if len(results) == 0 && len(errs) > 0 {
@@ -76,6 +78,7 @@ func (h *NotificationHandler) SendBulk(w http.ResponseWriter, r *http.Request) {
 // GET /api/v1/notifications/:id
 func (h *NotificationHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	reqID := middleware.RequestIDFromContext(r.Context())
+	tenantID := middleware.ClientFromContext(r.Context()).TenantID
 
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -83,7 +86,7 @@ func (h *NotificationHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	n, svcErr := h.svc.GetByID(r.Context(), id)
+	n, svcErr := h.svc.GetByID(r.Context(), tenantID, id)
 	if appErr := toAppError(svcErr); appErr != nil {
 		response.JSONError(w, appErr, reqID)
 		return
@@ -95,6 +98,7 @@ func (h *NotificationHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 // GET /api/v1/notifications
 func (h *NotificationHandler) List(w http.ResponseWriter, r *http.Request) {
 	reqID := middleware.RequestIDFromContext(r.Context())
+	tenantID := middleware.ClientFromContext(r.Context()).TenantID
 
 	q := r.URL.Query()
 	page, _ := strconv.Atoi(q.Get("page"))
@@ -114,7 +118,7 @@ func (h *NotificationHandler) List(w http.ResponseWriter, r *http.Request) {
 		PerPage:     perPage,
 	}
 
-	notifications, total, svcErr := h.svc.List(r.Context(), filter)
+	notifications, total, svcErr := h.svc.List(r.Context(), tenantID, filter)
 	if appErr := toAppError(svcErr); appErr != nil {
 		response.JSONError(w, appErr, reqID)
 		return
@@ -126,6 +130,7 @@ func (h *NotificationHandler) List(w http.ResponseWriter, r *http.Request) {
 // DELETE /api/v1/notifications/:id
 func (h *NotificationHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	reqID := middleware.RequestIDFromContext(r.Context())
+	tenantID := middleware.ClientFromContext(r.Context()).TenantID
 
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -133,7 +138,7 @@ func (h *NotificationHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	n, svcErr := h.svc.Cancel(r.Context(), id)
+	n, svcErr := h.svc.Cancel(r.Context(), tenantID, id)
 	if appErr := toAppError(svcErr); appErr != nil {
 		response.JSONError(w, appErr, reqID)
 		return

@@ -74,3 +74,35 @@ make run-worker         # Run worker locally
 ## Reference
 
 Full specification: `NOTIFICATION_SYSTEM_PLAN.md`
+
+---
+
+## Implementation Progress
+
+### Done
+
+- [x] Domain types — `notification`, `template`, `preference`, `delivery`, `api_client`, `errors`
+- [x] Config — `internal/config/config.go`
+- [x] Database — migrations, sqlc-generated queries, repository wrappers (notification, template, preference, delivery, api_client)
+- [x] Queue — Kafka producer & consumer (`internal/queue/`)
+- [x] Middleware — auth, logging, recovery, request-id
+- [x] Handlers — notification, template, preference, health
+- [x] Router — `internal/api/router.go`
+- [x] Services — notification, template, preference, rate-limit, scheduler, validate
+- [x] Worker — pool + processor (`internal/worker/`)
+- [x] Provider — mock (`internal/provider/mock/`)
+- [x] Seed script — `scripts/seed.go`
+- [x] Deployments — Dockerfile, docker-compose, Prometheus config
+- [x] Docs — db-schema, deployment, production-grade
+
+### Remaining
+
+- [ ] **Providers** — `internal/provider/ses/ses.go`, `internal/provider/fcm/fcm.go`, `internal/provider/twilio/twilio.go` (dirs exist, files missing)
+- [ ] **Observability** — `internal/observability/metrics.go` (Prometheus), `tracing.go` (OpenTelemetry), `health.go`
+- [ ] **Rate-limit middleware** — `internal/api/middleware/ratelimit.go` (service exists, HTTP middleware missing)
+- [x] **Internal tenant API** — `POST /internal/tenants` and `POST /internal/tenants/:id/api-keys` (protected by `X-Admin-Token`)
+- [ ] **CI/CD** — `.github/workflows/ci.yml` (lint + test + build), `.github/workflows/docker.yml` (build + push)
+- [ ] **Notification templates** — `templates/email/*.html`, `templates/sms/*.txt`
+- [ ] **Load tests** — `scripts/loadtest/send_notification.js` (k6)
+- [ ] **ADRs** — `docs/adr/` (Go over Node, Kafka over RabbitMQ, pgx over GORM, sqlc for queries)
+- [ ] **OpenAPI spec** — `docs/api.yaml`

@@ -71,7 +71,7 @@ func (p *Processor) Process(ctx context.Context, msg queue.Message) error {
 	)
 
 	// ── Step 1: fetch canonical notification from DB ──────────────────────────
-	n, err := p.notifRepo.GetByID(ctx, msg.NotificationID)
+	n, err := p.notifRepo.GetByID(ctx, msg.TenantID, msg.NotificationID)
 	if err != nil {
 		return fmt.Errorf("fetch notification: %w", err)
 	}
@@ -82,7 +82,7 @@ func (p *Processor) Process(ctx context.Context, msg queue.Message) error {
 	}
 
 	// ── Step 3: preference check ──────────────────────────────────────────────
-	allowed, reason, err := p.prefs.IsAllowed(ctx, n.RecipientID, n.Channel)
+	allowed, reason, err := p.prefs.IsAllowed(ctx, msg.TenantID, n.RecipientID, n.Channel)
 	if err != nil {
 		return fmt.Errorf("preference check: %w", err)
 	}
@@ -113,7 +113,7 @@ func (p *Processor) Process(ctx context.Context, msg queue.Message) error {
 	}
 
 	if n.TemplateID != nil {
-		subject, body, err := p.templates.Render(ctx, *n.TemplateID, n.Payload)
+		subject, body, err := p.templates.Render(ctx, msg.TenantID, *n.TemplateID, n.Payload)
 		if err != nil {
 			// Render failure is permanent — a bad template can never succeed on retry.
 			log.ErrorContext(ctx, "template render failed", slog.Any("error", err))

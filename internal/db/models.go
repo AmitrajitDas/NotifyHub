@@ -14,12 +14,13 @@ import (
 )
 
 type ApiClient struct {
-	ID         uuid.UUID `json:"id"`
-	Name       string    `json:"name"`
-	ApiKeyHash string    `json:"api_key_hash"`
-	IsActive   bool      `json:"is_active"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID         uuid.UUID     `json:"id"`
+	Name       string        `json:"name"`
+	ApiKeyHash string        `json:"api_key_hash"`
+	IsActive   bool          `json:"is_active"`
+	CreatedAt  time.Time     `json:"created_at"`
+	UpdatedAt  time.Time     `json:"updated_at"`
+	TenantID   uuid.NullUUID `json:"tenant_id"`
 }
 
 type DeliveryLog struct {
@@ -50,6 +51,7 @@ type Notification struct {
 	ScheduledAt      sql.NullTime    `json:"scheduled_at"`
 	CreatedAt        time.Time       `json:"created_at"`
 	UpdatedAt        time.Time       `json:"updated_at"`
+	TenantID         uuid.NullUUID   `json:"tenant_id"`
 }
 
 type Preference struct {
@@ -64,6 +66,7 @@ type Preference struct {
 	Timezone               sql.NullString `json:"timezone"`
 	CreatedAt              time.Time      `json:"created_at"`
 	UpdatedAt              time.Time      `json:"updated_at"`
+	TenantID               uuid.NullUUID  `json:"tenant_id"`
 }
 
 type Template struct {
@@ -77,4 +80,13 @@ type Template struct {
 	IsActive        bool                  `json:"is_active"`
 	CreatedAt       time.Time             `json:"created_at"`
 	UpdatedAt       time.Time             `json:"updated_at"`
+	TenantID        uuid.NullUUID         `json:"tenant_id"`
+}
+
+type Tenant struct {
+	ID        uuid.UUID `json:"id"`
+	Name      string    `json:"name"`
+	IsActive  bool      `json:"is_active"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }

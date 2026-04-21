@@ -16,12 +16,17 @@ import (
 const cancelNotification = `-- name: CancelNotification :one
 UPDATE notifications
 SET status = 'dropped', updated_at = NOW()
-WHERE id = $1 AND status IN ('pending', 'queued')
-RETURNING id, idempotency_key, type, channel, recipient_id, recipient_address, template_id, payload, priority, status, scheduled_at, created_at, updated_at
+WHERE id = $1 AND tenant_id = $2 AND status IN ('pending', 'queued')
+RETURNING id, idempotency_key, type, channel, recipient_id, recipient_address, template_id, payload, priority, status, scheduled_at, created_at, updated_at, tenant_id
 `
 
-func (q *Queries) CancelNotification(ctx context.Context, id uuid.UUID) (Notification, error) {
-	row := q.db.QueryRowContext(ctx, cancelNotification, id)
+type CancelNotificationParams struct {
+	ID       uuid.UUID     `json:"id"`
+	TenantID uuid.NullUUID `json:"tenant_id"`
+}
+
+func (q *Queries) CancelNotification(ctx context.Context, arg CancelNotificationParams) (Notification, error) {
+	row := q.db.QueryRowContext(ctx, cancelNotification, arg.ID, arg.TenantID)
 	var i Notification
 	err := row.Scan(
 		&i.ID,
@@ -37,6 +42,7 @@ func (q *Queries) CancelNotification(ctx context.Context, id uuid.UUID) (Notific
 		&i.ScheduledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -44,31 +50,43 @@ func (q *Queries) CancelNotification(ctx context.Context, id uuid.UUID) (Notific
 const countNotifications = `-- name: CountNotifications :one
 SELECT COUNT(*) FROM notifications
 WHERE
-    ($1::text = '' OR recipient_id = $1) AND
-    ($2::text = '' OR channel = $2) AND
-    ($3::text = '' OR status = $3)
+    tenant_id = $1 AND
+    ($2::text = '' OR recipient_id = $2) AND
+    ($3::text = '' OR channel = $3) AND
+    ($4::text = '' OR status = $4)
 `
 
 type CountNotificationsParams struct {
-	RecipientID string `json:"recipient_id"`
-	Channel     string `json:"channel"`
-	Status      string `json:"status"`
+	TenantID    uuid.NullUUID `json:"tenant_id"`
+	RecipientID string        `json:"recipient_id"`
+	Channel     string        `json:"channel"`
+	Status      string        `json:"status"`
 }
 
 func (q *Queries) CountNotifications(ctx context.Context, arg CountNotificationsParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countNotifications, arg.RecipientID, arg.Channel, arg.Status)
+	row := q.db.QueryRowContext(ctx, countNotifications,
+		arg.TenantID,
+		arg.RecipientID,
+		arg.Channel,
+		arg.Status,
+	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
 const getNotificationByID = `-- name: GetNotificationByID :one
-SELECT id, idempotency_key, type, channel, recipient_id, recipient_address, template_id, payload, priority, status, scheduled_at, created_at, updated_at FROM notifications
-WHERE id = $1
+SELECT id, idempotency_key, type, channel, recipient_id, recipient_address, template_id, payload, priority, status, scheduled_at, created_at, updated_at, tenant_id FROM notifications
+WHERE id = $1 AND tenant_id = $2
 `
 
-func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (Notification, error) {
-	row := q.db.QueryRowContext(ctx, getNotificationByID, id)
+type GetNotificationByIDParams struct {
+	ID       uuid.UUID     `json:"id"`
+	TenantID uuid.NullUUID `json:"tenant_id"`
+}
+
+func (q *Queries) GetNotificationByID(ctx context.Context, arg GetNotificationByIDParams) (Notification, error) {
+	row := q.db.QueryRowContext(ctx, getNotificationByID, arg.ID, arg.TenantID)
 	var i Notification
 	err := row.Scan(
 		&i.ID,
@@ -84,17 +102,23 @@ func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (Notifi
 		&i.ScheduledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const getNotificationByIdempotencyKey = `-- name: GetNotificationByIdempotencyKey :one
-SELECT id, idempotency_key, type, channel, recipient_id, recipient_address, template_id, payload, priority, status, scheduled_at, created_at, updated_at FROM notifications
-WHERE idempotency_key = $1
+SELECT id, idempotency_key, type, channel, recipient_id, recipient_address, template_id, payload, priority, status, scheduled_at, created_at, updated_at, tenant_id FROM notifications
+WHERE idempotency_key = $1 AND tenant_id = $2
 `
 
-func (q *Queries) GetNotificationByIdempotencyKey(ctx context.Context, idempotencyKey sql.NullString) (Notification, error) {
-	row := q.db.QueryRowContext(ctx, getNotificationByIdempotencyKey, idempotencyKey)
+type GetNotificationByIdempotencyKeyParams struct {
+	IdempotencyKey sql.NullString `json:"idempotency_key"`
+	TenantID       uuid.NullUUID  `json:"tenant_id"`
+}
+
+func (q *Queries) GetNotificationByIdempotencyKey(ctx context.Context, arg GetNotificationByIdempotencyKeyParams) (Notification, error) {
+	row := q.db.QueryRowContext(ctx, getNotificationByIdempotencyKey, arg.IdempotencyKey, arg.TenantID)
 	var i Notification
 	err := row.Scan(
 		&i.ID,
@@ -110,12 +134,14 @@ func (q *Queries) GetNotificationByIdempotencyKey(ctx context.Context, idempoten
 		&i.ScheduledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const insertNotification = `-- name: InsertNotification :one
 INSERT INTO notifications (
+    tenant_id,
     idempotency_key,
     type,
     channel,
@@ -127,12 +153,13 @@ INSERT INTO notifications (
     status,
     scheduled_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
-RETURNING id, idempotency_key, type, channel, recipient_id, recipient_address, template_id, payload, priority, status, scheduled_at, created_at, updated_at
+RETURNING id, idempotency_key, type, channel, recipient_id, recipient_address, template_id, payload, priority, status, scheduled_at, created_at, updated_at, tenant_id
 `
 
 type InsertNotificationParams struct {
+	TenantID         uuid.NullUUID   `json:"tenant_id"`
 	IdempotencyKey   sql.NullString  `json:"idempotency_key"`
 	Type             string          `json:"type"`
 	Channel          string          `json:"channel"`
@@ -147,6 +174,7 @@ type InsertNotificationParams struct {
 
 func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotificationParams) (Notification, error) {
 	row := q.db.QueryRowContext(ctx, insertNotification,
+		arg.TenantID,
 		arg.IdempotencyKey,
 		arg.Type,
 		arg.Channel,
@@ -173,12 +201,13 @@ func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotification
 		&i.ScheduledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const listDueScheduledNotifications = `-- name: ListDueScheduledNotifications :many
-SELECT id, idempotency_key, type, channel, recipient_id, recipient_address, template_id, payload, priority, status, scheduled_at, created_at, updated_at FROM notifications
+SELECT id, idempotency_key, type, channel, recipient_id, recipient_address, template_id, payload, priority, status, scheduled_at, created_at, updated_at, tenant_id FROM notifications
 WHERE status = 'pending'
   AND scheduled_at IS NOT NULL
   AND scheduled_at <= NOW()
@@ -209,6 +238,7 @@ func (q *Queries) ListDueScheduledNotifications(ctx context.Context, limit int32
 			&i.ScheduledAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -224,25 +254,28 @@ func (q *Queries) ListDueScheduledNotifications(ctx context.Context, limit int32
 }
 
 const listNotifications = `-- name: ListNotifications :many
-SELECT id, idempotency_key, type, channel, recipient_id, recipient_address, template_id, payload, priority, status, scheduled_at, created_at, updated_at FROM notifications
+SELECT id, idempotency_key, type, channel, recipient_id, recipient_address, template_id, payload, priority, status, scheduled_at, created_at, updated_at, tenant_id FROM notifications
 WHERE
-    ($1::text = '' OR recipient_id = $1) AND
-    ($2::text = '' OR channel = $2) AND
-    ($3::text = '' OR status = $3)
+    tenant_id = $1 AND
+    ($2::text = '' OR recipient_id = $2) AND
+    ($3::text = '' OR channel = $3) AND
+    ($4::text = '' OR status = $4)
 ORDER BY created_at DESC
-LIMIT $5 OFFSET $4
+LIMIT $6 OFFSET $5
 `
 
 type ListNotificationsParams struct {
-	RecipientID string `json:"recipient_id"`
-	Channel     string `json:"channel"`
-	Status      string `json:"status"`
-	Offset      int32  `json:"offset"`
-	Limit       int32  `json:"limit"`
+	TenantID    uuid.NullUUID `json:"tenant_id"`
+	RecipientID string        `json:"recipient_id"`
+	Channel     string        `json:"channel"`
+	Status      string        `json:"status"`
+	Offset      int32         `json:"offset"`
+	Limit       int32         `json:"limit"`
 }
 
 func (q *Queries) ListNotifications(ctx context.Context, arg ListNotificationsParams) ([]Notification, error) {
 	rows, err := q.db.QueryContext(ctx, listNotifications,
+		arg.TenantID,
 		arg.RecipientID,
 		arg.Channel,
 		arg.Status,
@@ -270,6 +303,7 @@ func (q *Queries) ListNotifications(ctx context.Context, arg ListNotificationsPa
 			&i.ScheduledAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -288,7 +322,7 @@ const updateNotificationStatus = `-- name: UpdateNotificationStatus :one
 UPDATE notifications
 SET status = $2, updated_at = NOW()
 WHERE id = $1
-RETURNING id, idempotency_key, type, channel, recipient_id, recipient_address, template_id, payload, priority, status, scheduled_at, created_at, updated_at
+RETURNING id, idempotency_key, type, channel, recipient_id, recipient_address, template_id, payload, priority, status, scheduled_at, created_at, updated_at, tenant_id
 `
 
 type UpdateNotificationStatusParams struct {
@@ -313,6 +347,7 @@ func (q *Queries) UpdateNotificationStatus(ctx context.Context, arg UpdateNotifi
 		&i.ScheduledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }

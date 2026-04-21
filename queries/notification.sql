@@ -1,5 +1,6 @@
 -- name: InsertNotification :one
 INSERT INTO notifications (
+    tenant_id,
     idempotency_key,
     type,
     channel,
@@ -11,21 +12,22 @@ INSERT INTO notifications (
     status,
     scheduled_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
 RETURNING *;
 
 -- name: GetNotificationByID :one
 SELECT * FROM notifications
-WHERE id = $1;
+WHERE id = $1 AND tenant_id = $2;
 
 -- name: GetNotificationByIdempotencyKey :one
 SELECT * FROM notifications
-WHERE idempotency_key = $1;
+WHERE idempotency_key = $1 AND tenant_id = $2;
 
 -- name: ListNotifications :many
 SELECT * FROM notifications
 WHERE
+    tenant_id = sqlc.arg(tenant_id) AND
     (sqlc.arg(recipient_id)::text = '' OR recipient_id = sqlc.arg(recipient_id)) AND
     (sqlc.arg(channel)::text = '' OR channel = sqlc.arg(channel)) AND
     (sqlc.arg(status)::text = '' OR status = sqlc.arg(status))
@@ -35,6 +37,7 @@ LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
 -- name: CountNotifications :one
 SELECT COUNT(*) FROM notifications
 WHERE
+    tenant_id = sqlc.arg(tenant_id) AND
     (sqlc.arg(recipient_id)::text = '' OR recipient_id = sqlc.arg(recipient_id)) AND
     (sqlc.arg(channel)::text = '' OR channel = sqlc.arg(channel)) AND
     (sqlc.arg(status)::text = '' OR status = sqlc.arg(status));
@@ -48,7 +51,7 @@ RETURNING *;
 -- name: CancelNotification :one
 UPDATE notifications
 SET status = 'dropped', updated_at = NOW()
-WHERE id = $1 AND status IN ('pending', 'queued')
+WHERE id = $1 AND tenant_id = $2 AND status IN ('pending', 'queued')
 RETURNING *;
 
 -- name: ListDueScheduledNotifications :many

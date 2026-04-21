@@ -8,35 +8,39 @@ package db
 import (
 	"context"
 	"database/sql"
+
+	"github.com/google/uuid"
 )
 
 const deletePreference = `-- name: DeletePreference :exec
 DELETE FROM preferences
-WHERE user_id = $1 AND channel = $2
+WHERE tenant_id = $1 AND user_id = $2 AND channel = $3
 `
 
 type DeletePreferenceParams struct {
-	UserID  string `json:"user_id"`
-	Channel string `json:"channel"`
+	TenantID uuid.NullUUID `json:"tenant_id"`
+	UserID   string        `json:"user_id"`
+	Channel  string        `json:"channel"`
 }
 
 func (q *Queries) DeletePreference(ctx context.Context, arg DeletePreferenceParams) error {
-	_, err := q.db.ExecContext(ctx, deletePreference, arg.UserID, arg.Channel)
+	_, err := q.db.ExecContext(ctx, deletePreference, arg.TenantID, arg.UserID, arg.Channel)
 	return err
 }
 
 const getPreference = `-- name: GetPreference :one
-SELECT id, user_id, channel, enabled, quiet_hours_start, quiet_hours_end, frequency_cap, frequency_window_minutes, timezone, created_at, updated_at FROM preferences
-WHERE user_id = $1 AND channel = $2
+SELECT id, user_id, channel, enabled, quiet_hours_start, quiet_hours_end, frequency_cap, frequency_window_minutes, timezone, created_at, updated_at, tenant_id FROM preferences
+WHERE tenant_id = $1 AND user_id = $2 AND channel = $3
 `
 
 type GetPreferenceParams struct {
-	UserID  string `json:"user_id"`
-	Channel string `json:"channel"`
+	TenantID uuid.NullUUID `json:"tenant_id"`
+	UserID   string        `json:"user_id"`
+	Channel  string        `json:"channel"`
 }
 
 func (q *Queries) GetPreference(ctx context.Context, arg GetPreferenceParams) (Preference, error) {
-	row := q.db.QueryRowContext(ctx, getPreference, arg.UserID, arg.Channel)
+	row := q.db.QueryRowContext(ctx, getPreference, arg.TenantID, arg.UserID, arg.Channel)
 	var i Preference
 	err := row.Scan(
 		&i.ID,
@@ -50,18 +54,24 @@ func (q *Queries) GetPreference(ctx context.Context, arg GetPreferenceParams) (P
 		&i.Timezone,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const listPreferencesByUser = `-- name: ListPreferencesByUser :many
-SELECT id, user_id, channel, enabled, quiet_hours_start, quiet_hours_end, frequency_cap, frequency_window_minutes, timezone, created_at, updated_at FROM preferences
-WHERE user_id = $1
+SELECT id, user_id, channel, enabled, quiet_hours_start, quiet_hours_end, frequency_cap, frequency_window_minutes, timezone, created_at, updated_at, tenant_id FROM preferences
+WHERE tenant_id = $1 AND user_id = $2
 ORDER BY channel ASC
 `
 
-func (q *Queries) ListPreferencesByUser(ctx context.Context, userID string) ([]Preference, error) {
-	rows, err := q.db.QueryContext(ctx, listPreferencesByUser, userID)
+type ListPreferencesByUserParams struct {
+	TenantID uuid.NullUUID `json:"tenant_id"`
+	UserID   string        `json:"user_id"`
+}
+
+func (q *Queries) ListPreferencesByUser(ctx context.Context, arg ListPreferencesByUserParams) ([]Preference, error) {
+	rows, err := q.db.QueryContext(ctx, listPreferencesByUser, arg.TenantID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -81,6 +91,7 @@ func (q *Queries) ListPreferencesByUser(ctx context.Context, userID string) ([]P
 			&i.Timezone,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -97,6 +108,7 @@ func (q *Queries) ListPreferencesByUser(ctx context.Context, userID string) ([]P
 
 const upsertPreference = `-- name: UpsertPreference :one
 INSERT INTO preferences (
+    tenant_id,
     user_id,
     channel,
     enabled,
@@ -106,9 +118,9 @@ INSERT INTO preferences (
     frequency_window_minutes,
     timezone
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, $3, $4, $5, $6, $7, $8, $9
 )
-ON CONFLICT (user_id, channel) DO UPDATE SET
+ON CONFLICT (tenant_id, user_id, channel) DO UPDATE SET
     enabled                  = EXCLUDED.enabled,
     quiet_hours_start        = EXCLUDED.quiet_hours_start,
     quiet_hours_end          = EXCLUDED.quiet_hours_end,
@@ -116,10 +128,11 @@ ON CONFLICT (user_id, channel) DO UPDATE SET
     frequency_window_minutes = EXCLUDED.frequency_window_minutes,
     timezone                 = EXCLUDED.timezone,
     updated_at               = NOW()
-RETURNING id, user_id, channel, enabled, quiet_hours_start, quiet_hours_end, frequency_cap, frequency_window_minutes, timezone, created_at, updated_at
+RETURNING id, user_id, channel, enabled, quiet_hours_start, quiet_hours_end, frequency_cap, frequency_window_minutes, timezone, created_at, updated_at, tenant_id
 `
 
 type UpsertPreferenceParams struct {
+	TenantID               uuid.NullUUID  `json:"tenant_id"`
 	UserID                 string         `json:"user_id"`
 	Channel                string         `json:"channel"`
 	Enabled                bool           `json:"enabled"`
@@ -132,6 +145,7 @@ type UpsertPreferenceParams struct {
 
 func (q *Queries) UpsertPreference(ctx context.Context, arg UpsertPreferenceParams) (Preference, error) {
 	row := q.db.QueryRowContext(ctx, upsertPreference,
+		arg.TenantID,
 		arg.UserID,
 		arg.Channel,
 		arg.Enabled,
@@ -154,6 +168,7 @@ func (q *Queries) UpsertPreference(ctx context.Context, arg UpsertPreferencePara
 		&i.Timezone,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }

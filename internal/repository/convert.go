@@ -33,6 +33,10 @@ func toNullUUID(u *uuid.UUID) uuid.NullUUID {
 	return uuid.NullUUID{UUID: *u, Valid: true}
 }
 
+func uuidToNullUUID(u uuid.UUID) uuid.NullUUID {
+	return uuid.NullUUID{UUID: u, Valid: true}
+}
+
 func fromNullUUID(nu uuid.NullUUID) *uuid.UUID {
 	if !nu.Valid {
 		return nil

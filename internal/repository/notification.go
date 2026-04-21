@@ -13,11 +13,11 @@ import (
 
 // NotificationRepository defines DB operations for notifications.
 type NotificationRepository interface {
-	Create(ctx context.Context, req domain.SendRequest) (*domain.Notification, error)
-	GetByID(ctx context.Context, id uuid.UUID) (*domain.Notification, error)
-	GetByIdempotencyKey(ctx context.Context, key string) (*domain.Notification, error)
-	List(ctx context.Context, filter domain.ListNotificationsFilter) ([]domain.Notification, int64, error)
-	Cancel(ctx context.Context, id uuid.UUID) (*domain.Notification, error)
+	Create(ctx context.Context, tenantID uuid.UUID, req domain.SendRequest) (*domain.Notification, error)
+	GetByID(ctx context.Context, tenantID uuid.UUID, id uuid.UUID) (*domain.Notification, error)
+	GetByIdempotencyKey(ctx context.Context, tenantID uuid.UUID, key string) (*domain.Notification, error)
+	List(ctx context.Context, tenantID uuid.UUID, filter domain.ListNotificationsFilter) ([]domain.Notification, int64, error)
+	Cancel(ctx context.Context, tenantID uuid.UUID, id uuid.UUID) (*domain.Notification, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.NotificationStatus) (*domain.Notification, error)
 	// ListDueScheduled returns up to limit pending notifications whose scheduled_at <= NOW().
 	ListDueScheduled(ctx context.Context, limit int) ([]domain.Notification, error)
@@ -31,13 +31,14 @@ func NewNotificationRepository(q *db.Queries) NotificationRepository {
 	return &postgresNotificationRepo{q: q}
 }
 
-func (r *postgresNotificationRepo) Create(ctx context.Context, req domain.SendRequest) (*domain.Notification, error) {
+func (r *postgresNotificationRepo) Create(ctx context.Context, tenantID uuid.UUID, req domain.SendRequest) (*domain.Notification, error) {
 	priority := req.Priority
 	if priority == 0 {
 		priority = domain.PriorityNormal
 	}
 
 	row, err := r.q.InsertNotification(ctx, db.InsertNotificationParams{
+		TenantID:         uuidToNullUUID(tenantID),
 		IdempotencyKey:   toNullString(req.IdempotencyKey),
 		Type:             req.Type,
 		Channel:          string(req.Channel),
@@ -56,8 +57,11 @@ func (r *postgresNotificationRepo) Create(ctx context.Context, req domain.SendRe
 	return &n, nil
 }
 
-func (r *postgresNotificationRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Notification, error) {
-	row, err := r.q.GetNotificationByID(ctx, id)
+func (r *postgresNotificationRepo) GetByID(ctx context.Context, tenantID uuid.UUID, id uuid.UUID) (*domain.Notification, error) {
+	row, err := r.q.GetNotificationByID(ctx, db.GetNotificationByIDParams{
+		ID:       id,
+		TenantID: uuidToNullUUID(tenantID),
+	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.NewNotFoundError("notification not found")
@@ -68,8 +72,11 @@ func (r *postgresNotificationRepo) GetByID(ctx context.Context, id uuid.UUID) (*
 	return &n, nil
 }
 
-func (r *postgresNotificationRepo) GetByIdempotencyKey(ctx context.Context, key string) (*domain.Notification, error) {
-	row, err := r.q.GetNotificationByIdempotencyKey(ctx, toNullString(&key))
+func (r *postgresNotificationRepo) GetByIdempotencyKey(ctx context.Context, tenantID uuid.UUID, key string) (*domain.Notification, error) {
+	row, err := r.q.GetNotificationByIdempotencyKey(ctx, db.GetNotificationByIdempotencyKeyParams{
+		IdempotencyKey: toNullString(&key),
+		TenantID:       uuidToNullUUID(tenantID),
+	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil // not found = no duplicate, safe to proceed
@@ -80,7 +87,7 @@ func (r *postgresNotificationRepo) GetByIdempotencyKey(ctx context.Context, key 
 	return &n, nil
 }
 
-func (r *postgresNotificationRepo) List(ctx context.Context, filter domain.ListNotificationsFilter) ([]domain.Notification, int64, error) {
+func (r *postgresNotificationRepo) List(ctx context.Context, tenantID uuid.UUID, filter domain.ListNotificationsFilter) ([]domain.Notification, int64, error) {
 	if filter.Page < 1 {
 		filter.Page = 1
 	}
@@ -88,7 +95,9 @@ func (r *postgresNotificationRepo) List(ctx context.Context, filter domain.ListN
 		filter.PerPage = 20
 	}
 
+	tID := uuidToNullUUID(tenantID)
 	rows, err := r.q.ListNotifications(ctx, db.ListNotificationsParams{
+		TenantID:    tID,
 		RecipientID: filter.RecipientID,
 		Channel:     string(filter.Channel),
 		Status:      string(filter.Status),
@@ -99,6 +108,7 @@ func (r *postgresNotificationRepo) List(ctx context.Context, filter domain.ListN
 		return nil, 0, domain.NewInternalError("failed to list notifications", err)
 	}
 	total, err := r.q.CountNotifications(ctx, db.CountNotificationsParams{
+		TenantID:    tID,
 		RecipientID: filter.RecipientID,
 		Channel:     string(filter.Channel),
 		Status:      string(filter.Status),
@@ -114,8 +124,11 @@ func (r *postgresNotificationRepo) List(ctx context.Context, filter domain.ListN
 	return out, total, nil
 }
 
-func (r *postgresNotificationRepo) Cancel(ctx context.Context, id uuid.UUID) (*domain.Notification, error) {
-	row, err := r.q.CancelNotification(ctx, id)
+func (r *postgresNotificationRepo) Cancel(ctx context.Context, tenantID uuid.UUID, id uuid.UUID) (*domain.Notification, error) {
+	row, err := r.q.CancelNotification(ctx, db.CancelNotificationParams{
+		ID:       id,
+		TenantID: uuidToNullUUID(tenantID),
+	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.NewNotFoundError("notification not found or not cancellable")

@@ -14,6 +14,7 @@ import (
 // here prevents an import cycle between those two packages.
 type Message struct {
 	NotificationID   uuid.UUID       `json:"notification_id"`
+	TenantID         uuid.UUID       `json:"tenant_id"`
 	Channel          domain.Channel  `json:"channel"`
 	RecipientID      string          `json:"recipient_id"`
 	RecipientAddress string          `json:"recipient_address"`

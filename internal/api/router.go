@@ -14,11 +14,13 @@ import (
 // RouterDeps holds all handlers needed to build the router.
 type RouterDeps struct {
 	Auth         middleware.APIClientLookup
+	AdminToken   string
 	Logger       *slog.Logger
 	Notification *handler.NotificationHandler
 	Template     *handler.TemplateHandler
 	Preference   *handler.PreferenceHandler
 	Health       *handler.HealthHandler
+	Tenant       *handler.TenantHandler
 }
 
 func NewRouter(deps RouterDeps) http.Handler {
@@ -32,6 +34,15 @@ func NewRouter(deps RouterDeps) http.Handler {
 
 	// Health — no auth required
 	r.Get("/health", deps.Health.Health)
+
+	// Internal admin routes — protected by X-Admin-Token (no API key auth)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.AdminAuth(deps.AdminToken, deps.Logger))
+		r.Route("/internal/tenants", func(r chi.Router) {
+			r.Post("/", deps.Tenant.CreateTenant)
+			r.Post("/{id}/api-keys", deps.Tenant.CreateAPIKey)
+		})
+	})
 
 	// Authenticated API routes
 	r.Group(func(r chi.Router) {

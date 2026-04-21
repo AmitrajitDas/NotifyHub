@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 
 	"github.com/amitrajitdas31/notifyhub/internal/domain"
 	"github.com/amitrajitdas31/notifyhub/internal/repository"
@@ -12,13 +13,13 @@ import (
 
 // PreferenceService defines business logic for user notification preferences.
 type PreferenceService interface {
-	Get(ctx context.Context, userID string, channel domain.Channel) (*domain.Preference, error)
-	ListByUser(ctx context.Context, userID string) ([]domain.Preference, error)
-	Upsert(ctx context.Context, userID string, channel domain.Channel, req domain.UpsertPreferenceRequest) (*domain.Preference, error)
-	Delete(ctx context.Context, userID string, channel domain.Channel) error
+	Get(ctx context.Context, tenantID uuid.UUID, userID string, channel domain.Channel) (*domain.Preference, error)
+	ListByUser(ctx context.Context, tenantID uuid.UUID, userID string) ([]domain.Preference, error)
+	Upsert(ctx context.Context, tenantID uuid.UUID, userID string, channel domain.Channel, req domain.UpsertPreferenceRequest) (*domain.Preference, error)
+	Delete(ctx context.Context, tenantID uuid.UUID, userID string, channel domain.Channel) error
 	// IsAllowed checks whether a notification may be delivered to a user on a given channel.
 	// Returns (true, "") if allowed, or (false, reason) if blocked.
-	IsAllowed(ctx context.Context, userID string, channel domain.Channel) (bool, string, error)
+	IsAllowed(ctx context.Context, tenantID uuid.UUID, userID string, channel domain.Channel) (bool, string, error)
 }
 
 type preferenceService struct {
@@ -30,27 +31,27 @@ func NewPreferenceService(repo repository.PreferenceRepository, v *validator.Val
 	return &preferenceService{repo: repo, validator: v}
 }
 
-func (s *preferenceService) Get(ctx context.Context, userID string, channel domain.Channel) (*domain.Preference, error) {
-	return s.repo.Get(ctx, userID, channel)
+func (s *preferenceService) Get(ctx context.Context, tenantID uuid.UUID, userID string, channel domain.Channel) (*domain.Preference, error) {
+	return s.repo.Get(ctx, tenantID, userID, channel)
 }
 
-func (s *preferenceService) ListByUser(ctx context.Context, userID string) ([]domain.Preference, error) {
-	return s.repo.ListByUser(ctx, userID)
+func (s *preferenceService) ListByUser(ctx context.Context, tenantID uuid.UUID, userID string) ([]domain.Preference, error) {
+	return s.repo.ListByUser(ctx, tenantID, userID)
 }
 
-func (s *preferenceService) Upsert(ctx context.Context, userID string, channel domain.Channel, req domain.UpsertPreferenceRequest) (*domain.Preference, error) {
+func (s *preferenceService) Upsert(ctx context.Context, tenantID uuid.UUID, userID string, channel domain.Channel, req domain.UpsertPreferenceRequest) (*domain.Preference, error) {
 	if err := s.validator.StructCtx(ctx, req); err != nil {
 		return nil, toValidationError(err)
 	}
-	return s.repo.Upsert(ctx, userID, channel, req)
+	return s.repo.Upsert(ctx, tenantID, userID, channel, req)
 }
 
-func (s *preferenceService) Delete(ctx context.Context, userID string, channel domain.Channel) error {
-	return s.repo.Delete(ctx, userID, channel)
+func (s *preferenceService) Delete(ctx context.Context, tenantID uuid.UUID, userID string, channel domain.Channel) error {
+	return s.repo.Delete(ctx, tenantID, userID, channel)
 }
 
-func (s *preferenceService) IsAllowed(ctx context.Context, userID string, channel domain.Channel) (bool, string, error) {
-	pref, err := s.repo.Get(ctx, userID, channel)
+func (s *preferenceService) IsAllowed(ctx context.Context, tenantID uuid.UUID, userID string, channel domain.Channel) (bool, string, error) {
+	pref, err := s.repo.Get(ctx, tenantID, userID, channel)
 	if err != nil {
 		// No preference record = use defaults (allow everything).
 		appErr, ok := err.(*domain.AppError)

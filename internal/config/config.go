@@ -49,6 +49,9 @@ type Config struct {
 	RateLimitPushPerHour  int
 	RateLimitSMSPerHour   int
 	RateLimitInAppPerHour int
+
+	// Admin
+	AdminToken string
 }
 
 func Load() (*Config, error) {
@@ -65,6 +68,7 @@ func Load() (*Config, error) {
 		TwilioAccountSID:       getEnv("TWILIO_ACCOUNT_SID", ""),
 		TwilioAuthToken:        getEnv("TWILIO_AUTH_TOKEN", ""),
 		TwilioFromNumber:       getEnv("TWILIO_FROM_NUMBER", ""),
+		AdminToken:             getEnv("ADMIN_TOKEN", ""),
 	}
 
 	// Required

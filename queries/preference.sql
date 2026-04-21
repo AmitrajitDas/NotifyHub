@@ -1,5 +1,6 @@
 -- name: UpsertPreference :one
 INSERT INTO preferences (
+    tenant_id,
     user_id,
     channel,
     enabled,
@@ -9,9 +10,9 @@ INSERT INTO preferences (
     frequency_window_minutes,
     timezone
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, $3, $4, $5, $6, $7, $8, $9
 )
-ON CONFLICT (user_id, channel) DO UPDATE SET
+ON CONFLICT (tenant_id, user_id, channel) DO UPDATE SET
     enabled                  = EXCLUDED.enabled,
     quiet_hours_start        = EXCLUDED.quiet_hours_start,
     quiet_hours_end          = EXCLUDED.quiet_hours_end,
@@ -23,13 +24,13 @@ RETURNING *;
 
 -- name: GetPreference :one
 SELECT * FROM preferences
-WHERE user_id = $1 AND channel = $2;
+WHERE tenant_id = $1 AND user_id = $2 AND channel = $3;
 
 -- name: ListPreferencesByUser :many
 SELECT * FROM preferences
-WHERE user_id = $1
+WHERE tenant_id = $1 AND user_id = $2
 ORDER BY channel ASC;
 
 -- name: DeletePreference :exec
 DELETE FROM preferences
-WHERE user_id = $1 AND channel = $2;
+WHERE tenant_id = $1 AND user_id = $2 AND channel = $3;

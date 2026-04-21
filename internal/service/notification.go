@@ -21,19 +21,19 @@ type Publisher interface {
 	Publish(ctx context.Context, topic, key string, payload []byte) error
 }
 
-//NotificationService defines business logic for sending and querying notifications.
+// NotificationService defines business logic for sending and querying notifications.
 type NotificationService interface {
-	Send(ctx context.Context, req domain.SendRequest) (*domain.Notification, error)
-	SendBulk(ctx context.Context, req domain.BulkSendRequest) ([]*domain.Notification, []error)
-	GetByID(ctx context.Context, id uuid.UUID) (*domain.Notification, error)
-	List(ctx context.Context, filter domain.ListNotificationsFilter) ([]domain.Notification, int64, error)
-	Cancel(ctx context.Context, id uuid.UUID) (*domain.Notification, error)
+	Send(ctx context.Context, tenantID uuid.UUID, req domain.SendRequest) (*domain.Notification, error)
+	SendBulk(ctx context.Context, tenantID uuid.UUID, req domain.BulkSendRequest) ([]*domain.Notification, []error)
+	GetByID(ctx context.Context, tenantID uuid.UUID, id uuid.UUID) (*domain.Notification, error)
+	List(ctx context.Context, tenantID uuid.UUID, filter domain.ListNotificationsFilter) ([]domain.Notification, int64, error)
+	Cancel(ctx context.Context, tenantID uuid.UUID, id uuid.UUID) (*domain.Notification, error)
 }
 
 type notificationService struct {
-	repo      repository.NotificationRepository
-	publisher Publisher
-	validator *validator.Validate
+	repo       repository.NotificationRepository
+	publisher  Publisher
+	validator  *validator.Validate
 	maxRetries int
 }
 
@@ -51,14 +51,14 @@ func NewNotificationService(
 	}
 }
 
-func (s *notificationService) Send(ctx context.Context, req domain.SendRequest) (*domain.Notification, error) {
+func (s *notificationService) Send(ctx context.Context, tenantID uuid.UUID, req domain.SendRequest) (*domain.Notification, error) {
 	if err := s.validator.StructCtx(ctx, req); err != nil {
 		return nil, toValidationError(err)
 	}
 
 	// Idempotency: return existing notification if this key was already processed.
 	if req.IdempotencyKey != nil && *req.IdempotencyKey != "" {
-		existing, err := s.repo.GetByIdempotencyKey(ctx, *req.IdempotencyKey)
+		existing, err := s.repo.GetByIdempotencyKey(ctx, tenantID, *req.IdempotencyKey)
 		if err != nil {
 			return nil, err
 		}
@@ -68,7 +68,7 @@ func (s *notificationService) Send(ctx context.Context, req domain.SendRequest) 
 	}
 
 	// Persist with status=pending.
-	n, err := s.repo.Create(ctx, req)
+	n, err := s.repo.Create(ctx, tenantID, req)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +80,7 @@ func (s *notificationService) Send(ctx context.Context, req domain.SendRequest) 
 
 	// Publish to channel topic.
 	// If this fails, the notification stays pending so the scheduler can rescue it.
-	if err := s.enqueue(ctx, n); err != nil {
+	if err := s.enqueue(ctx, tenantID, n); err != nil {
 		return nil, fmt.Errorf("enqueue notification: %w", err)
 	}
 
@@ -93,7 +93,7 @@ func (s *notificationService) Send(ctx context.Context, req domain.SendRequest) 
 	return n, nil
 }
 
-func (s *notificationService) SendBulk(ctx context.Context, req domain.BulkSendRequest) ([]*domain.Notification, []error) {
+func (s *notificationService) SendBulk(ctx context.Context, tenantID uuid.UUID, req domain.BulkSendRequest) ([]*domain.Notification, []error) {
 	if err := s.validator.StructCtx(ctx, req); err != nil {
 		return nil, []error{toValidationError(err)}
 	}
@@ -117,7 +117,7 @@ func (s *notificationService) SendBulk(ctx context.Context, req domain.BulkSendR
 			Priority:         req.Priority,
 		}
 
-		n, err := s.Send(ctx, single)
+		n, err := s.Send(ctx, tenantID, single)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("recipient %s: %w", recipient.RecipientID, err))
 			continue
@@ -128,21 +128,22 @@ func (s *notificationService) SendBulk(ctx context.Context, req domain.BulkSendR
 	return results, errs
 }
 
-func (s *notificationService) GetByID(ctx context.Context, id uuid.UUID) (*domain.Notification, error) {
-	return s.repo.GetByID(ctx, id)
+func (s *notificationService) GetByID(ctx context.Context, tenantID uuid.UUID, id uuid.UUID) (*domain.Notification, error) {
+	return s.repo.GetByID(ctx, tenantID, id)
 }
 
-func (s *notificationService) List(ctx context.Context, filter domain.ListNotificationsFilter) ([]domain.Notification, int64, error) {
-	return s.repo.List(ctx, filter)
+func (s *notificationService) List(ctx context.Context, tenantID uuid.UUID, filter domain.ListNotificationsFilter) ([]domain.Notification, int64, error) {
+	return s.repo.List(ctx, tenantID, filter)
 }
 
-func (s *notificationService) Cancel(ctx context.Context, id uuid.UUID) (*domain.Notification, error) {
-	return s.repo.Cancel(ctx, id)
+func (s *notificationService) Cancel(ctx context.Context, tenantID uuid.UUID, id uuid.UUID) (*domain.Notification, error) {
+	return s.repo.Cancel(ctx, tenantID, id)
 }
 
-func (s *notificationService) enqueue(ctx context.Context, n *domain.Notification) error {
+func (s *notificationService) enqueue(ctx context.Context, tenantID uuid.UUID, n *domain.Notification) error {
 	msg := queue.Message{
 		NotificationID:   n.ID,
+		TenantID:         tenantID,
 		Channel:          n.Channel,
 		RecipientID:      n.RecipientID,
 		RecipientAddress: n.RecipientAddress,

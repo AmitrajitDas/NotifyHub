@@ -89,6 +89,7 @@ func main() {
 	templateSvc := service.NewTemplateService(templateRepo, validate)
 	preferenceSvc := service.NewPreferenceService(preferenceRepo, validate)
 	notifSvc := service.NewNotificationService(notifRepo, publisher, validate, cfg.WorkerRetryMaxAttempts)
+	rateLimitSvc := service.NewRateLimitService(redisClient)
 
 	// 9. Handlers
 	notifHandler := handler.NewNotificationHandler(notifSvc)
@@ -102,6 +103,8 @@ func main() {
 		Auth:         apiClientRepo,
 		AdminToken:   cfg.AdminToken,
 		Logger:       logger,
+		RateLimit:    rateLimitSvc,
+		RateLimitRPM: cfg.RateLimitAPIRPM,
 		Notification: notifHandler,
 		Template:     templateHandler,
 		Preference:   prefHandler,

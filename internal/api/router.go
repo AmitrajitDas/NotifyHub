@@ -9,18 +9,21 @@ import (
 
 	"github.com/amitrajitdas31/notifyhub/internal/api/handler"
 	"github.com/amitrajitdas31/notifyhub/internal/api/middleware"
+	"github.com/amitrajitdas31/notifyhub/internal/service"
 )
 
 // RouterDeps holds all handlers needed to build the router.
 type RouterDeps struct {
-	Auth         middleware.APIClientLookup
-	AdminToken   string
-	Logger       *slog.Logger
-	Notification *handler.NotificationHandler
-	Template     *handler.TemplateHandler
-	Preference   *handler.PreferenceHandler
-	Health       *handler.HealthHandler
-	Tenant       *handler.TenantHandler
+	Auth            middleware.APIClientLookup
+	AdminToken      string
+	Logger          *slog.Logger
+	RateLimit       service.RateLimitService
+	RateLimitRPM    int
+	Notification    *handler.NotificationHandler
+	Template        *handler.TemplateHandler
+	Preference      *handler.PreferenceHandler
+	Health          *handler.HealthHandler
+	Tenant          *handler.TenantHandler
 }
 
 func NewRouter(deps RouterDeps) http.Handler {
@@ -47,6 +50,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 	// Authenticated API routes
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(deps.Auth, deps.Logger))
+		r.Use(middleware.RateLimit(deps.RateLimit, deps.RateLimitRPM, deps.Logger))
 
 		r.Route("/api/v1", func(r chi.Router) {
 

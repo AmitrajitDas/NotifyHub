@@ -90,6 +90,8 @@ func codeToStatus(code string) int {
 		return http.StatusUnauthorized
 	case domain.ErrCodeForbidden:
 		return http.StatusForbidden
+	case domain.ErrCodeRateLimited:
+		return http.StatusTooManyRequests
 	default:
 		return http.StatusInternalServerError
 	}

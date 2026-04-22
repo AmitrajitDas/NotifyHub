@@ -17,6 +17,10 @@ type RateLimitService interface {
 	// It atomically records the attempt and returns (true, nil) if allowed,
 	// or (false, nil) if the limit is exceeded. Non-nil err means Redis failure.
 	Allow(ctx context.Context, userID string, channel domain.Channel, windowMinutes, cap int) (bool, error)
+
+	// AllowKey is the generic form of Allow. key is the full Redis sorted-set key;
+	// window and cap define the sliding window. Callers compose keys themselves.
+	AllowKey(ctx context.Context, key string, window time.Duration, cap int) (bool, error)
 }
 
 type rateLimitService struct {
@@ -27,9 +31,14 @@ func NewRateLimitService(r *redis.Client) RateLimitService {
 	return &rateLimitService{redis: r}
 }
 
-// Allow implements a sliding window log using a Redis sorted set.
+// Allow delegates to AllowKey using a key composed from userID and channel.
+func (s *rateLimitService) Allow(ctx context.Context, userID string, channel domain.Channel, windowMinutes, cap int) (bool, error) {
+	key := fmt.Sprintf("ratelimit:%s:%s", userID, string(channel))
+	return s.AllowKey(ctx, key, time.Duration(windowMinutes)*time.Minute, cap)
+}
+
+// AllowKey implements a sliding window log using a Redis sorted set.
 //
-// Key:   ratelimit:{userID}:{channel}
 // Score: current Unix nanoseconds (unique per entry)
 // Steps (executed in a pipeline for efficiency):
 //  1. ZREMRANGEBYSCORE — evict entries older than the window
@@ -39,11 +48,9 @@ func NewRateLimitService(r *redis.Client) RateLimitService {
 //
 // If the count before adding is >= cap, the attempt is still recorded
 // (so we don't lose the slot) but we return false to the caller.
-func (s *rateLimitService) Allow(ctx context.Context, userID string, channel domain.Channel, windowMinutes, cap int) (bool, error) {
-	key := fmt.Sprintf("ratelimit:%s:%s", userID, string(channel))
+func (s *rateLimitService) AllowKey(ctx context.Context, key string, window time.Duration, cap int) (bool, error) {
 	now := time.Now()
-	windowDur := time.Duration(windowMinutes) * time.Minute
-	windowStart := now.Add(-windowDur).UnixNano()
+	windowStart := now.Add(-window).UnixNano()
 	score := float64(now.UnixNano())
 
 	var countCmd *redis.IntCmd
@@ -59,7 +66,7 @@ func (s *rateLimitService) Allow(ctx context.Context, userID string, channel dom
 		pipe.ZAdd(ctx, key, redis.Z{Score: score, Member: score})
 
 		// 4. Set TTL so the key expires naturally.
-		pipe.Expire(ctx, key, windowDur+time.Second)
+		pipe.Expire(ctx, key, window+time.Second)
 
 		return nil
 	})

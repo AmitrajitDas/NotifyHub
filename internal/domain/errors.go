@@ -9,6 +9,7 @@ const (
 	ErrCodeValidation   = "VALIDATION_ERROR"
 	ErrCodeUnauthorized = "UNAUTHORIZED"
 	ErrCodeForbidden    = "FORBIDDEN"
+	ErrCodeRateLimited  = "RATE_LIMITED"
 	ErrCodeInternal     = "INTERNAL_ERROR"
 )
 
@@ -42,6 +43,10 @@ func NewUnauthorizedError(msg string) *AppError {
 
 func NewForbiddenError(msg string) *AppError {
 	return &AppError{Code: ErrCodeForbidden, Message: msg}
+}
+
+func NewRateLimitedError(msg string) *AppError {
+	return &AppError{Code: ErrCodeRateLimited, Message: msg}
 }
 
 func NewInternalError(msg string, cause error) *AppError {

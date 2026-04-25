@@ -26,9 +26,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+
+	tmplloader "github.com/amitrajitdas31/notifyhub/internal/template"
 )
 
 func main() {
@@ -95,12 +99,46 @@ func main() {
 		fatalf("insert api_client: %v\n", err)
 	}
 
+	// Seed starter templates from the templates/ directory.
+	_, thisFile, _, _ := runtime.Caller(0)
+	repoRoot := filepath.Dir(filepath.Dir(thisFile))
+	tmplCount := 0
+	for _, subdir := range []string{"email", "sms"} {
+		dir := filepath.Join(repoRoot, "templates", subdir)
+		templates, err := tmplloader.LoadFromDir(dir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warn: load templates from %s: %v\n", dir, err)
+			continue
+		}
+		for _, t := range templates {
+			var subj *string
+			if t.SubjectTemplate != nil {
+				subj = t.SubjectTemplate
+			}
+			_, err := db.ExecContext(ctx,
+				`INSERT INTO templates (tenant_id, name, channel, subject_template, body_template, version, is_active)
+				 VALUES ($1, $2, $3, $4, $5, 1, true)
+				 ON CONFLICT (name) DO UPDATE
+				   SET subject_template = EXCLUDED.subject_template,
+				       body_template    = EXCLUDED.body_template,
+				       updated_at       = NOW()`,
+				tenantID, t.Name, string(t.Channel), subj, t.BodyTemplate,
+			)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warn: upsert template %q: %v\n", t.Name, err)
+				continue
+			}
+			tmplCount++
+		}
+	}
+
 	fmt.Printf("\nSeeded successfully\n")
 	fmt.Printf("  Tenant ID:  %s\n", tenantID)
 	fmt.Printf("  Tenant:     %s\n", *tenantName)
 	fmt.Printf("  Client ID:  %s\n", clientID)
 	fmt.Printf("  Client:     %s\n", *name)
-	fmt.Printf("  API Key:    %s\n\n", *rawKey)
+	fmt.Printf("  API Key:    %s\n", *rawKey)
+	fmt.Printf("  Templates:  %d seeded\n\n", tmplCount)
 	fmt.Printf("Use this header in every request:\n")
 	fmt.Printf("  X-API-Key: %s\n\n", *rawKey)
 }

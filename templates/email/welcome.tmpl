@@ -1,0 +1,22 @@
+---
+name: welcome
+channel: email
+subject: Welcome to {{.app_name}}, {{.user_name}}!
+---
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<title>Welcome</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+	<h1>Welcome to {{.app_name}}</h1>
+	<p>Hi {{.user_name}},</p>
+	<p>Thank you for joining {{.app_name}}. We're excited to have you on board!</p>
+	<p>{{.message}}</p>
+	{{if .cta_url}}
+	<p><a href="{{.cta_url}}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Get Started</a></p>
+	{{end}}
+	<p>Best regards,<br>The {{.app_name}} Team</p>
+</body>
+</html>

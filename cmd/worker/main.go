@@ -18,7 +18,10 @@ import (
 	"github.com/amitrajitdas31/notifyhub/internal/db"
 	"github.com/amitrajitdas31/notifyhub/internal/domain"
 	"github.com/amitrajitdas31/notifyhub/internal/provider"
+	fcmprovider "github.com/amitrajitdas31/notifyhub/internal/provider/fcm"
 	mockprovider "github.com/amitrajitdas31/notifyhub/internal/provider/mock"
+	sesprovider "github.com/amitrajitdas31/notifyhub/internal/provider/ses"
+	twilioprovider "github.com/amitrajitdas31/notifyhub/internal/provider/twilio"
 	"github.com/amitrajitdas31/notifyhub/internal/queue"
 	"github.com/amitrajitdas31/notifyhub/internal/repository"
 	"github.com/amitrajitdas31/notifyhub/internal/service"
@@ -96,17 +99,59 @@ func main() {
 	}()
 
 	// 9. Provider registry
-	// Register mock providers for all channels. Swap these for real providers
-	// (ses, fcm, twilio) once credentials are configured.
+	// Registers real providers if credentials are configured, falls back to mock for local dev.
 	registry := provider.NewRegistry()
-	for _, ch := range []domain.Channel{
-		domain.ChannelEmail,
-		domain.ChannelPush,
-		domain.ChannelSMS,
-		domain.ChannelInApp,
-	} {
-		registry.Register(mockprovider.New(ch, logger))
+
+	// Email: SES if configured, else mock
+	if cfg.SESFromEmail != "" {
+		emailProvider, err := sesprovider.New(context.Background(), cfg.SESRegion, cfg.SESFromEmail, logger)
+		if err != nil {
+			logger.Error("failed to initialize SES provider, falling back to mock", "error", err)
+			registry.Register(mockprovider.New(domain.ChannelEmail, logger))
+		} else {
+			registry.Register(emailProvider)
+			logger.Info("registered SES email provider")
+		}
+	} else {
+		registry.Register(mockprovider.New(domain.ChannelEmail, logger))
 	}
+
+	// Push: FCM if configured, else mock
+	if cfg.FCMCredentialsFile != "" {
+		pushProvider, err := fcmprovider.New(context.Background(), cfg.FCMCredentialsFile, logger)
+		if err != nil {
+			logger.Error("failed to initialize FCM provider, falling back to mock", "error", err)
+			registry.Register(mockprovider.New(domain.ChannelPush, logger))
+		} else {
+			registry.Register(pushProvider)
+			logger.Info("registered FCM push provider")
+		}
+	} else {
+		registry.Register(mockprovider.New(domain.ChannelPush, logger))
+	}
+
+	// SMS: Twilio if configured, else mock
+	if cfg.TwilioAccountSID != "" && cfg.TwilioAuthToken != "" {
+		smsProvider, err := twilioprovider.New(
+			cfg.TwilioAccountSID,
+			cfg.TwilioAuthToken,
+			cfg.TwilioFromNumber,
+			"",
+			logger,
+		)
+		if err != nil {
+			logger.Error("failed to initialize Twilio provider, falling back to mock", "error", err)
+			registry.Register(mockprovider.New(domain.ChannelSMS, logger))
+		} else {
+			registry.Register(smsProvider)
+			logger.Info("registered Twilio SMS provider")
+		}
+	} else {
+		registry.Register(mockprovider.New(domain.ChannelSMS, logger))
+	}
+
+	// InApp: always mock (no external provider)
+	registry.Register(mockprovider.New(domain.ChannelInApp, logger))
 
 	// 10. Per-channel rate caps (notifications per hour)
 	rateCaps := map[domain.Channel]int{

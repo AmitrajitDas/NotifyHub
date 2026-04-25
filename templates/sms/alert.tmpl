@@ -1,0 +1,5 @@
+---
+name: alert
+channel: sms
+---
+[{{.app_name}} Alert] {{.alert_title}}: {{.alert_message}} {{if .action_url}}Learn more: {{.action_url}}{{end}}

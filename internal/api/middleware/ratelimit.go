@@ -9,6 +9,7 @@ import (
 
 	"github.com/amitrajitdas31/notifyhub/internal/api/response"
 	"github.com/amitrajitdas31/notifyhub/internal/domain"
+	"github.com/amitrajitdas31/notifyhub/internal/observability"
 	"github.com/amitrajitdas31/notifyhub/internal/service"
 )
 
@@ -19,7 +20,7 @@ import (
 // On Redis failure the middleware fails open — the request is allowed through
 // and the error is logged. Blocking all API traffic on Redis flaps is worse
 // than temporarily losing rate-limit enforcement.
-func RateLimit(svc service.RateLimitService, rpm int, logger *slog.Logger) func(http.Handler) http.Handler {
+func RateLimit(svc service.RateLimitService, rpm int, metrics *observability.Metrics, logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			reqID := RequestIDFromContext(r.Context())
@@ -35,16 +36,20 @@ func RateLimit(svc service.RateLimitService, rpm int, logger *slog.Logger) func(
 			ok, err := svc.AllowKey(r.Context(), key, time.Minute, rpm)
 			if err != nil {
 				logger.Error("rate limit check failed, failing open", "error", err, "request_id", reqID, "client_id", client.ID)
+				// Fail open: count as allowed so dashboards show the anomaly without blocking traffic.
+				metrics.RateLimitDecisions.WithLabelValues(observability.ScopeAPI, observability.OutcomeAllowed).Inc()
 				next.ServeHTTP(w, r)
 				return
 			}
 
 			if !ok {
+				metrics.RateLimitDecisions.WithLabelValues(observability.ScopeAPI, observability.OutcomeDenied).Inc()
 				w.Header().Set("Retry-After", strconv.Itoa(60))
 				response.JSONError(w, domain.NewRateLimitedError("API rate limit exceeded"), reqID)
 				return
 			}
 
+			metrics.RateLimitDecisions.WithLabelValues(observability.ScopeAPI, observability.OutcomeAllowed).Inc()
 			next.ServeHTTP(w, r)
 		})
 	}

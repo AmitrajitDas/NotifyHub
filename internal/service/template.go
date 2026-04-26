@@ -5,11 +5,13 @@ import (
 	"context"
 	"fmt"
 	"text/template"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 
 	"github.com/amitrajitdas31/notifyhub/internal/domain"
+	"github.com/amitrajitdas31/notifyhub/internal/observability"
 	"github.com/amitrajitdas31/notifyhub/internal/repository"
 )
 
@@ -28,10 +30,13 @@ type TemplateService interface {
 type templateService struct {
 	repo      repository.TemplateRepository
 	validator *validator.Validate
+	metrics   *observability.Metrics
 }
 
-func NewTemplateService(repo repository.TemplateRepository, v *validator.Validate) TemplateService {
-	return &templateService{repo: repo, validator: v}
+// NewTemplateService wires up the template service.
+// metrics is used to record render latency via TemplateRenderDur.
+func NewTemplateService(repo repository.TemplateRepository, v *validator.Validate, metrics *observability.Metrics) TemplateService {
+	return &templateService{repo: repo, validator: v, metrics: metrics}
 }
 
 func (s *templateService) Create(ctx context.Context, tenantID uuid.UUID, req domain.CreateTemplateRequest) (*domain.Template, error) {
@@ -92,7 +97,13 @@ func (s *templateService) Preview(ctx context.Context, tenantID uuid.UUID, id uu
 	return resp, nil
 }
 
+// Render fetches and executes the template, recording render latency.
 func (s *templateService) Render(ctx context.Context, tenantID uuid.UUID, templateID uuid.UUID, payload map[string]any) (subject, body string, err error) {
+	start := time.Now()
+	defer func() {
+		s.metrics.TemplateRenderDur.Observe(time.Since(start).Seconds())
+	}()
+
 	tmpl, err := s.repo.GetByID(ctx, tenantID, templateID)
 	if err != nil {
 		return "", "", err

@@ -1,0 +1,97 @@
+# OpenTelemetry Collector configuration for NotifyHub.
+#
+# Receivers:
+#   - otlp: accepts traces (and optionally metrics/logs) from api and worker
+#     over gRPC (4317) and HTTP (4318).
+#   - prometheus: scrapes /metrics from api:8080 and worker:9091 on a 15 s
+#     interval and forwards the samples to Prometheus via remote-write.
+#
+# Processors:
+#   - batch: buffers spans/metrics before export to reduce round-trips.
+#   - resource: attaches the deployment.environment attribute to every signal.
+#
+# Exporters:
+#   - otlp/tempo: forwards traces to Tempo over gRPC.
+#   - loki: pushes log records to Loki (used if OTel log SDK is added later).
+#   - prometheusremotewrite: writes metrics to Prometheus.
+#
+# Pipelines wire receivers → processors → exporters per signal type.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Pull /metrics from both app services and forward to Prometheus.
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: notifyhub-api
+          scrape_interval: 15s
+          static_configs:
+            - targets: ["api:8080"]
+          metrics_path: /metrics
+
+        - job_name: notifyhub-worker
+          scrape_interval: 15s
+          static_configs:
+            - targets: ["worker:9091"]
+          metrics_path: /metrics
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: development
+        action: upsert
+
+exporters:
+  # Traces → Tempo
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+  # Metrics → Prometheus remote-write receiver
+  prometheusremotewrite:
+    endpoint: http://prometheus:9090/api/v1/write
+    tls:
+      insecure: true
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # Logs → Loki (for future OTel log SDK use)
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+    default_labels_enabled:
+      exporter: false
+      job: true
+
+  # Debug exporter — logs every received signal to collector stdout.
+  # Remove or set verbosity: basic in production.
+  debug:
+    verbosity: normal
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [resource, batch]
+      exporters: [otlp/tempo, debug]
+
+    metrics:
+      receivers: [prometheus]
+      processors: [resource, batch]
+      exporters: [prometheusremotewrite]
+
+    logs:
+      receivers: [otlp]
+      processors: [resource, batch]
+      exporters: [loki]

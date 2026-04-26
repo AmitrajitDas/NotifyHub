@@ -52,6 +52,29 @@ type Config struct {
 
 	// Admin
 	AdminToken string
+
+	// DLQ
+	DLQEnabled         bool
+	DLQConsumerEnabled bool
+	DLQGroupID         string
+
+	// Observability — OpenTelemetry
+	// OTELEndpoint is the OTLP gRPC endpoint of the OTel Collector.
+	// Leave empty to disable tracing (a no-op provider will be used).
+	OTELEndpoint    string
+	OTELInsecure    bool    // disable TLS on the gRPC connection (safe for same-cluster comms)
+	OTELSampleRatio float64 // fraction of traces to sample; default 0.1 (10 %)
+
+	// Observability — build identity
+	// These are injected at build time via -ldflags, not read from the environment.
+	ServiceVersion string
+	GitCommit      string
+
+	// Observability — worker admin server
+	// MetricsPort is the HTTP port the worker exposes for /metrics, /livez, /readyz.
+	// Distinct from the API port so the worker container can export metrics
+	// without opening the full API surface.
+	MetricsPort string
 }
 
 func Load() (*Config, error) {
@@ -69,6 +92,12 @@ func Load() (*Config, error) {
 		TwilioAuthToken:        getEnv("TWILIO_AUTH_TOKEN", ""),
 		TwilioFromNumber:       getEnv("TWILIO_FROM_NUMBER", ""),
 		AdminToken:             getEnv("ADMIN_TOKEN", ""),
+		DLQEnabled:             getEnv("DLQ_ENABLED", "true") != "false",
+		DLQConsumerEnabled:     getEnv("DLQ_CONSUMER_ENABLED", "true") != "false",
+		DLQGroupID:             getEnv("DLQ_GROUP_ID", "notifyhub-dlq-consumer"),
+		OTELEndpoint:           getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
+		OTELInsecure:           getEnv("OTEL_EXPORTER_OTLP_INSECURE", "true") != "false",
+		MetricsPort:            getEnv("METRICS_PORT", "9091"),
 	}
 
 	// Required
@@ -128,7 +157,23 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("RATELIMIT_INAPP_PER_HOUR: %w", err)
 	}
 
+	if cfg.OTELSampleRatio, err = getEnvFloat("OTEL_TRACES_SAMPLER_ARG", 0.1); err != nil {
+		return nil, fmt.Errorf("OTEL_TRACES_SAMPLER_ARG: %w", err)
+	}
+
 	return cfg, nil
+}
+
+func getEnvFloat(key string, fallback float64) (float64, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback, nil
+	}
+	n, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid float value %q: %w", v, err)
+	}
+	return n, nil
 }
 
 func getEnv(key, fallback string) string {

@@ -1,0 +1,67 @@
+# Grafana Tempo configuration for NotifyHub.
+# Tempo stores distributed traces received from the OTel Collector and
+# exposes a query API on port 3200 for Grafana to read from.
+
+stream_over_http_enabled: true
+
+server:
+  http_listen_port: 3200
+  log_level: info
+
+# Distributor accepts traces over OTLP gRPC from the collector.
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+
+# Ingester buffers spans in memory before flushing to the backend.
+ingester:
+  max_block_duration: 5m
+
+# Compactor merges small blocks to keep query performance consistent.
+compactor:
+  compaction:
+    block_retention: 48h   # keep 2 days of traces in local dev
+
+# Storage backend — local filesystem for dev (use S3/GCS in production).
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal
+
+# Query frontend — enables TraceQL search and tag-value autocomplete.
+query_frontend:
+  search:
+    duration_slo: 5s
+    throughput_bytes_slo: 1.073741824e+09
+
+querier:
+  frontend_worker:
+    frontend_address: localhost:9095
+
+# Metrics generator enables service graph and span metrics derived from traces.
+# These appear automatically in Grafana's Service Graph view.
+metrics_generator:
+  registry:
+    external_labels:
+      source: tempo
+      cluster: notifyhub-dev
+  storage:
+    path: /var/tempo/generator/wal
+    remote_write:
+      - url: http://prometheus:9090/api/v1/write
+        send_exemplars: true
+
+overrides:
+  defaults:
+    metrics_generator:
+      processors: [service-graphs, span-metrics]
+      # Explicitly enable the metrics generator for this tenant (required in
+      # Tempo ≥ 2.3 — the processors list alone is not sufficient).
+      generate_native_histograms: both
+  metrics_generator_enabled: true

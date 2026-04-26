@@ -57,6 +57,9 @@ func newWithClient(c sender, fromNumber, messagingSvcID string, logger *slog.Log
 // Channel reports that this provider handles SMS.
 func (p *Provider) Channel() domain.Channel { return domain.ChannelSMS }
 
+// Name returns the provider identifier used in metric labels.
+func (p *Provider) Name() string { return "twilio" }
+
 // Send builds a CreateMessage request and classifies failures for the worker.
 func (p *Provider) Send(ctx context.Context, n domain.Notification) error {
 	body := extractBody(n.Payload)

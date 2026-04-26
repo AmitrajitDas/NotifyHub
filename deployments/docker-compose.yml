@@ -1,6 +1,8 @@
 name: notifyhub
 
 services:
+  # ── Application services ─────────────────────────────────────────────────────
+
   api:
     build:
       context: ..
@@ -15,6 +17,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
     environment:
       PORT: "8080"
       ENVIRONMENT: development
@@ -22,6 +26,9 @@ services:
       DATABASE_URL: postgres://notifyhub:notifyhub@postgres:5432/notifyhub?sslmode=disable
       REDIS_URL: redis://redis:6379
       KAFKA_BROKERS: kafka:29092
+      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+      OTEL_TRACES_SAMPLER_ARG: "1.0"   # 100 % in dev; lower in prod
     restart: on-failure
 
   worker:
@@ -29,6 +36,8 @@ services:
       context: ..
       dockerfile: deployments/Dockerfile
       target: worker
+    ports:
+      - "9091:9091"   # admin: /metrics, /livez, /readyz
     depends_on:
       postgres:
         condition: service_healthy
@@ -36,17 +45,26 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
     environment:
       ENVIRONMENT: development
       LOG_LEVEL: debug
       DATABASE_URL: postgres://notifyhub:notifyhub@postgres:5432/notifyhub?sslmode=disable
       REDIS_URL: redis://redis:6379
       KAFKA_BROKERS: kafka:29092
+      METRICS_PORT: "9091"
       WORKER_EMAIL_CONCURRENCY: "5"
       WORKER_PUSH_CONCURRENCY: "3"
       WORKER_SMS_CONCURRENCY: "2"
       WORKER_INAPP_CONCURRENCY: "5"
+      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+      OTEL_TRACES_SAMPLER_ARG: "1.0"
+      USER: notifyhub
     restart: on-failure
+
+  # ── Infrastructure ───────────────────────────────────────────────────────────
 
   postgres:
     image: postgres:16-alpine
@@ -113,29 +131,92 @@ services:
       KAFKA_CLUSTERS_0_NAME: notifyhub-local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
 
+  # ── Observability stack ───────────────────────────────────────────────────────
+  # Data flow:
+  #   api/worker → OTLP gRPC → otel-collector → Tempo (traces)
+  #   otel-collector pulls /metrics from api+worker → Prometheus remote-write
+  #   Alloy tails container stdout → Loki (logs)
+  #   Grafana reads from Prometheus, Tempo, and Loki
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.120.0
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8889:8889"   # Prometheus exporter (scraped by Prometheus)
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol-contrib/config.yaml
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    depends_on:
+      - tempo
+      - loki
+
+  tempo:
+    image: grafana/tempo:2.7.0
+    ports:
+      - "3200:3200"   # HTTP query API (Grafana data source)
+      - "4317"        # OTLP gRPC (collector sends here on the internal network)
+    volumes:
+      - ./tempo.yaml:/etc/tempo/tempo.yaml
+      - tempodata:/var/tempo
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+
+  loki:
+    image: grafana/loki:3.4.2
+    ports:
+      - "3100:3100"   # HTTP API (collector pushes here; Grafana reads from here)
+    volumes:
+      - ./loki.yaml:/etc/loki/loki.yaml
+      - lokidata:/loki
+    command: ["-config.file=/etc/loki/loki.yaml"]
+
+  # Grafana Alloy tails container stdout and ships JSON log lines to Loki.
+  alloy:
+    image: grafana/alloy:v1.7.1
+    ports:
+      - "12345:12345"   # Alloy UI
+    volumes:
+      - ./alloy.river:/etc/alloy/config.river
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: ["run", "--server.http.listen-addr=0.0.0.0:12345", "/etc/alloy/config.river"]
+    depends_on:
+      - loki
+
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.2.1
     ports:
       - "9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheusdata:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
       - "--web.enable-lifecycle"
+      - "--web.enable-remote-write-receiver"
+    depends_on:
+      - otel-collector
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.4.0
     ports:
       - "3000:3000"
     depends_on:
       - prometheus
+      - tempo
+      - loki
     environment:
       GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_FEATURE_TOGGLES_ENABLE: traceqlEditor
     volumes:
       - grafanadata:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
 
 volumes:
   pgdata:
   kafkadata:
+  prometheusdata:
+  tempodata:
+  lokidata:
   grafanadata:

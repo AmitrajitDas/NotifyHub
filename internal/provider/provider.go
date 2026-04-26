@@ -19,6 +19,11 @@ type Provider interface {
 	// Channel returns the delivery channel this provider handles.
 	// Used at registration time and in log/metric labels.
 	Channel() domain.Channel
+
+	// Name returns a short human-readable identifier for this backend
+	// (e.g. "ses", "fcm", "twilio", "mock"). Used as a Prometheus label
+	// and span attribute so metrics stay low-cardinality and informative.
+	Name() string
 }
 
 // ErrDeliveryTemporary signals a transient failure (network blip, upstream

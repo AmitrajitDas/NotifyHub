@@ -6,39 +6,53 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/amitrajitdas31/notifyhub/internal/api/handler"
 	"github.com/amitrajitdas31/notifyhub/internal/api/middleware"
+	"github.com/amitrajitdas31/notifyhub/internal/observability"
 	"github.com/amitrajitdas31/notifyhub/internal/service"
 )
 
-// RouterDeps holds all handlers needed to build the router.
+// RouterDeps holds all handlers and cross-cutting dependencies needed to build
+// the router. Passed as a struct rather than individual args to keep the call
+// site readable as the surface grows.
 type RouterDeps struct {
-	Auth            middleware.APIClientLookup
-	AdminToken      string
-	Logger          *slog.Logger
-	RateLimit       service.RateLimitService
-	RateLimitRPM    int
-	Notification    *handler.NotificationHandler
-	Template        *handler.TemplateHandler
-	Preference      *handler.PreferenceHandler
-	Health          *handler.HealthHandler
-	Tenant          *handler.TenantHandler
+	Auth         middleware.APIClientLookup
+	AdminToken   string
+	Logger       *slog.Logger
+	RateLimit    service.RateLimitService
+	RateLimitRPM int
+	Metrics      *observability.Metrics
+	Health       *observability.Checker
+	Notification *handler.NotificationHandler
+	Template     *handler.TemplateHandler
+	Preference   *handler.PreferenceHandler
+	Tenant       *handler.TenantHandler
 }
 
 func NewRouter(deps RouterDeps) http.Handler {
 	r := chi.NewRouter()
 
-	// Global middleware
+	// ── Global middleware (runs on every request) ─────────────────────────────
 	r.Use(chiMiddleware.RealIP)
 	r.Use(middleware.RequestID)
+	// otelhttp creates a server span per request and propagates W3C traceparent.
+	// It must run before Logging so the trace_id is available when we log.
+	r.Use(otelhttp.NewMiddleware("notifyhub-api",
+		otelhttp.WithMessageEvents(otelhttp.ReadEvents, otelhttp.WriteEvents),
+	))
 	r.Use(middleware.Logging(deps.Logger))
 	r.Use(middleware.Recovery(deps.Logger))
+	r.Use(middleware.MetricsMiddleware(deps.Metrics))
 
-	// Health — no auth required
+	// ── Observability endpoints (no auth, no rate-limit) ──────────────────────
+	r.Handle("/metrics", deps.Metrics.Handler())
+	r.Get("/livez", deps.Health.Live)
+	r.Get("/readyz", deps.Health.Ready)
 	r.Get("/health", deps.Health.Health)
 
-	// Internal admin routes — protected by X-Admin-Token (no API key auth)
+	// ── Internal admin routes (X-Admin-Token, no API key auth) ───────────────
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.AdminAuth(deps.AdminToken, deps.Logger))
 		r.Route("/internal/tenants", func(r chi.Router) {
@@ -47,10 +61,10 @@ func NewRouter(deps RouterDeps) http.Handler {
 		})
 	})
 
-	// Authenticated API routes
+	// ── Authenticated API routes ──────────────────────────────────────────────
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(deps.Auth, deps.Logger))
-		r.Use(middleware.RateLimit(deps.RateLimit, deps.RateLimitRPM, deps.Logger))
+		r.Use(middleware.RateLimit(deps.RateLimit, deps.RateLimitRPM, deps.Metrics, deps.Logger))
 
 		r.Route("/api/v1", func(r chi.Router) {
 

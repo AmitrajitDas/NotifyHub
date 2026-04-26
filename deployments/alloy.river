@@ -1,0 +1,75 @@
+// Grafana Alloy pipeline for NotifyHub.
+//
+// This configuration tails Docker container stdout logs, parses the JSON
+// emitted by slog, and ships them to Loki with labels that let you:
+//   - Filter by service (notifyhub-api, notifyhub-worker)
+//   - Jump from a log line to the matching Tempo trace using trace_id
+//
+// Flow: Docker log files → discovery.docker → loki.source.docker → loki.write
+
+// Discover all running Docker containers on the local daemon.
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+
+  filter {
+    name   = "name"
+    values = ["notifyhub-api*", "notifyhub-worker*"]
+  }
+}
+
+// Relabel discovered containers to extract a service name label.
+discovery.relabel "notifyhub" {
+  targets = discovery.docker.containers.targets
+
+  // service = container name without the leading slash and compose suffix.
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/notifyhub-(api|worker).*"
+    target_label  = "service"
+    replacement   = "notifyhub-$1"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    target_label  = "container"
+  }
+}
+
+// Tail log files for discovered containers and push to Loki.
+loki.source.docker "notifyhub" {
+  host    = "unix:///var/run/docker.sock"
+  targets = discovery.relabel.notifyhub.output
+
+  // Parse JSON log lines and promote trace_id / span_id as Loki labels so
+  // Grafana can render the "Logs for this span" panel in the Tempo viewer.
+  forward_to = [loki.process.extract_trace.receiver]
+}
+
+// Extract trace_id and span_id from the JSON body and promote them as labels.
+loki.process "extract_trace" {
+  stage.json {
+    expressions = {
+      trace_id = "trace_id",
+      span_id  = "span_id",
+      level    = "level",
+    }
+  }
+
+  // Only add trace labels when the fields are present (non-empty).
+  stage.labels {
+    values = {
+      trace_id = "",
+      span_id  = "",
+      level    = "",
+    }
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+// Write log entries to the local Loki instance.
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

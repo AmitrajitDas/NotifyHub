@@ -1,0 +1,41 @@
+# Grafana Loki configuration for NotifyHub.
+# Loki stores log streams pushed by Grafana Alloy (which tails container stdout).
+# Grafana queries Loki to show logs correlated with traces via trace_id labels.
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  log_level: info
+
+common:
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: "2024-01-01"
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  # Reject logs older than 1 hour to avoid backfill surprises in dev.
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  # Allow trace_id as a structured metadata field for log-to-trace correlation.
+  allow_structured_metadata: true
+
+ruler:
+  alertmanager_url: http://localhost:9093

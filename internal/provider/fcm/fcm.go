@@ -55,6 +55,9 @@ func newWithClient(c messagingClient, logger *slog.Logger) *Provider {
 // Channel reports that this provider handles push notifications.
 func (p *Provider) Channel() domain.Channel { return domain.ChannelPush }
 
+// Name returns the provider identifier used in metric labels.
+func (p *Provider) Name() string { return "fcm" }
+
 // Send builds a Message and sends it via FCM. Payload is flattened to FCM's
 // Data map (strings only); subject/body go into the Notification struct.
 func (p *Provider) Send(ctx context.Context, n domain.Notification) error {

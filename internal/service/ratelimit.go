@@ -16,7 +16,7 @@ type RateLimitService interface {
 	// Allow checks whether the user is within their rate limit for the channel.
 	// It atomically records the attempt and returns (true, nil) if allowed,
 	// or (false, nil) if the limit is exceeded. Non-nil err means Redis failure.
-	Allow(ctx context.Context, userID string, channel domain.Channel, windowMinutes, cap int) (bool, error)
+	Allow(ctx context.Context, userID string, channel domain.Channel, window time.Duration, cap int) (bool, error)
 
 	// AllowKey is the generic form of Allow. key is the full Redis sorted-set key;
 	// window and cap define the sliding window. Callers compose keys themselves.
@@ -32,9 +32,9 @@ func NewRateLimitService(r *redis.Client) RateLimitService {
 }
 
 // Allow delegates to AllowKey using a key composed from userID and channel.
-func (s *rateLimitService) Allow(ctx context.Context, userID string, channel domain.Channel, windowMinutes, cap int) (bool, error) {
+func (s *rateLimitService) Allow(ctx context.Context, userID string, channel domain.Channel, window time.Duration, cap int) (bool, error) {
 	key := fmt.Sprintf("ratelimit:%s:%s", userID, string(channel))
-	return s.AllowKey(ctx, key, time.Duration(windowMinutes)*time.Minute, cap)
+	return s.AllowKey(ctx, key, window, cap)
 }
 
 // AllowKey implements a sliding window log using a Redis sorted set.

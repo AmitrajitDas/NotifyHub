@@ -19,9 +19,16 @@ import (
 	"github.com/amitrajitdas31/notifyhub/internal/api/handler"
 	"github.com/amitrajitdas31/notifyhub/internal/config"
 	"github.com/amitrajitdas31/notifyhub/internal/db"
+	"github.com/amitrajitdas31/notifyhub/internal/observability"
 	"github.com/amitrajitdas31/notifyhub/internal/queue"
 	"github.com/amitrajitdas31/notifyhub/internal/repository"
 	"github.com/amitrajitdas31/notifyhub/internal/service"
+)
+
+// version and commit are injected at build time via -ldflags.
+var (
+	version = "dev"
+	commit  = "unknown"
 )
 
 func main() {
@@ -31,12 +38,31 @@ func main() {
 		slog.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
+	cfg.ServiceVersion = version
+	cfg.GitCommit = commit
 
-	// 2. Logger
+	// 2. Logger — JSON handler with trace_id / span_id injection
 	logger := buildLogger(cfg.LogLevel)
 	slog.SetDefault(logger)
 
-	// 3. Postgres
+	// 3. Tracing — no-op when OTEL_EXPORTER_OTLP_ENDPOINT is empty
+	shutdownTracer, err := observability.InitTracer(context.Background(), observability.TracingConfig{
+		Endpoint:    cfg.OTELEndpoint,
+		Insecure:    cfg.OTELInsecure,
+		ServiceName: "notifyhub-api",
+		Version:     cfg.ServiceVersion,
+		Environment: cfg.Environment,
+		SampleRatio: cfg.OTELSampleRatio,
+	})
+	if err != nil {
+		logger.Error("failed to init tracer", "error", err)
+		os.Exit(1)
+	}
+
+	// 4. Metrics
+	metrics := observability.NewMetrics(cfg.ServiceVersion, cfg.GitCommit, cfg.Environment)
+
+	// 5. Postgres
 	pool, err := buildPool(cfg)
 	if err != nil {
 		logger.Error("failed to connect to postgres", "error", err)
@@ -45,7 +71,7 @@ func main() {
 	defer pool.Close()
 	logger.Info("postgres connected")
 
-	// 4. Redis
+	// 6. Redis
 	redisOpts, err := redis.ParseURL(cfg.RedisURL)
 	if err != nil {
 		logger.Error("invalid redis url", "error", err)
@@ -63,19 +89,19 @@ func main() {
 	}
 	logger.Info("redis connected")
 
-	// 5. sqlc queries — pgx/v5/stdlib bridges pgxpool to database/sql so sqlc's DBTX interface is satisfied
+	// 7. sqlc queries
 	sqlDB := stdlib.OpenDBFromPool(pool)
 	defer sqlDB.Close()
 	queries := db.New(sqlDB)
 
-	// 6. Repositories
+	// 8. Repositories
 	apiClientRepo := repository.NewAPIClientRepository(queries)
 	tenantRepo := repository.NewTenantRepository(queries)
 	notifRepo := repository.NewNotificationRepository(queries)
 	templateRepo := repository.NewTemplateRepository(queries)
 	preferenceRepo := repository.NewPreferenceRepository(queries)
 
-	// 7. Kafka producer
+	// 9. Kafka producer
 	publisher := queue.NewProducer(cfg.KafkaBrokers, logger)
 	defer func() {
 		if err := publisher.Close(); err != nil {
@@ -83,50 +109,58 @@ func main() {
 		}
 	}()
 
-	// 8. Services
+	// 10. Services
 	validate := validator.New()
 	tenantSvc := service.NewTenantService(tenantRepo, apiClientRepo, validate)
-	templateSvc := service.NewTemplateService(templateRepo, validate)
+	templateSvc := service.NewTemplateService(templateRepo, validate, metrics)
 	preferenceSvc := service.NewPreferenceService(preferenceRepo, validate)
-	notifSvc := service.NewNotificationService(notifRepo, publisher, validate, cfg.WorkerRetryMaxAttempts)
+	notifSvc := service.NewNotificationService(notifRepo, publisher, validate, metrics, cfg.WorkerRetryMaxAttempts)
 	rateLimitSvc := service.NewRateLimitService(redisClient)
 
-	// 9. Handlers
+	// 11. Health checker — probes Postgres, Redis, and Kafka
+	checker := observability.NewChecker(3*time.Second,
+		observability.PostgresProbe(pool),
+		observability.RedisProbe(redisClient),
+		observability.KafkaProbe(cfg.KafkaBrokers),
+	)
+
+	// 12. Handlers
 	notifHandler := handler.NewNotificationHandler(notifSvc)
 	templateHandler := handler.NewTemplateHandler(templateSvc)
 	prefHandler := handler.NewPreferenceHandler(preferenceSvc)
-	healthHandler := handler.NewHealthHandler(pool, redisClient)
 	tenantHandler := handler.NewTenantHandler(tenantSvc)
 
-	// 10. Router
+	// 13. Router
 	router := api.NewRouter(api.RouterDeps{
 		Auth:         apiClientRepo,
 		AdminToken:   cfg.AdminToken,
 		Logger:       logger,
 		RateLimit:    rateLimitSvc,
 		RateLimitRPM: cfg.RateLimitAPIRPM,
+		Metrics:      metrics,
+		Health:       checker,
 		Notification: notifHandler,
 		Template:     templateHandler,
 		Preference:   prefHandler,
-		Health:       healthHandler,
 		Tenant:       tenantHandler,
 	})
 
-	// 11. HTTP server
+	// 14. HTTP server
 	srv := &http.Server{
-		Addr:         ":" + cfg.Port,
-		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:              ":" + cfg.Port,
+		Handler:           router,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	// 12. Graceful shutdown
+	// 15. Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		logger.Info("api server starting", "port", cfg.Port, "env", cfg.Environment)
+		logger.Info("api server starting", "port", cfg.Port, "env", cfg.Environment, "version", version)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("server error", "error", err)
 			os.Exit(1)
@@ -136,11 +170,18 @@ func main() {
 	<-quit
 	logger.Info("shutting down...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	// Shutdown order: stop accepting → flush tracer → done.
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("graceful shutdown failed", "error", err)
+	}
+
+	tracerCtx, tracerCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer tracerCancel()
+	if err := shutdownTracer(tracerCtx); err != nil {
+		logger.Error("tracer flush failed", "error", err)
 	}
 
 	logger.Info("server stopped")
@@ -158,7 +199,7 @@ func buildLogger(level string) *slog.Logger {
 	default:
 		l = slog.LevelInfo
 	}
-	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: l}))
+	return observability.NewLogger(l)
 }
 
 func buildPool(cfg *config.Config) (*pgxpool.Pool, error) {

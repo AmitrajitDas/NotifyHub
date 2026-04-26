@@ -9,8 +9,11 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 
 	"github.com/amitrajitdas31/notifyhub/internal/domain"
+	"github.com/amitrajitdas31/notifyhub/internal/observability"
 	"github.com/amitrajitdas31/notifyhub/internal/queue"
 	"github.com/amitrajitdas31/notifyhub/internal/repository"
 )
@@ -34,24 +37,37 @@ type notificationService struct {
 	repo       repository.NotificationRepository
 	publisher  Publisher
 	validator  *validator.Validate
+	metrics    *observability.Metrics
 	maxRetries int
 }
 
+// NewNotificationService wires up the notification service with all its dependencies.
+// metrics is used to record enqueue counts and trace spans per Send call.
 func NewNotificationService(
 	repo repository.NotificationRepository,
 	publisher Publisher,
 	v *validator.Validate,
+	metrics *observability.Metrics,
 	maxRetries int,
 ) NotificationService {
 	return &notificationService{
 		repo:       repo,
 		publisher:  publisher,
 		validator:  v,
+		metrics:    metrics,
 		maxRetries: maxRetries,
 	}
 }
 
 func (s *notificationService) Send(ctx context.Context, tenantID uuid.UUID, req domain.SendRequest) (*domain.Notification, error) {
+	ctx, span := observability.Tracer("service.notification").Start(ctx, "NotificationService.Send",
+		observability.WithSpanAttrs(
+			attribute.String("notifyhub.tenant_id", tenantID.String()),
+			attribute.String("notifyhub.channel", string(req.Channel)),
+		),
+	)
+	defer span.End()
+
 	if err := s.validator.StructCtx(ctx, req); err != nil {
 		return nil, toValidationError(err)
 	}
@@ -60,9 +76,12 @@ func (s *notificationService) Send(ctx context.Context, tenantID uuid.UUID, req 
 	if req.IdempotencyKey != nil && *req.IdempotencyKey != "" {
 		existing, err := s.repo.GetByIdempotencyKey(ctx, tenantID, *req.IdempotencyKey)
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "idempotency check failed")
 			return nil, err
 		}
 		if existing != nil {
+			span.SetAttributes(attribute.Bool("notifyhub.idempotent_hit", true))
 			return existing, nil
 		}
 	}
@@ -70,8 +89,11 @@ func (s *notificationService) Send(ctx context.Context, tenantID uuid.UUID, req 
 	// Persist with status=pending.
 	n, err := s.repo.Create(ctx, tenantID, req)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "create failed")
 		return nil, err
 	}
+	span.SetAttributes(attribute.String("notifyhub.notification_id", n.ID.String()))
 
 	// Skip queuing for scheduled notifications — the scheduler will enqueue them later.
 	if req.ScheduledAt != nil && req.ScheduledAt.After(time.Now()) {
@@ -81,12 +103,18 @@ func (s *notificationService) Send(ctx context.Context, tenantID uuid.UUID, req 
 	// Publish to channel topic.
 	// If this fails, the notification stays pending so the scheduler can rescue it.
 	if err := s.enqueue(ctx, tenantID, n); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "enqueue failed")
 		return nil, fmt.Errorf("enqueue notification: %w", err)
 	}
+
+	s.metrics.NotifEnqueued.WithLabelValues(string(n.Channel)).Inc()
 
 	// Mark as queued only after successful publish.
 	n, err = s.repo.UpdateStatus(ctx, n.ID, domain.StatusQueued)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "status update failed")
 		return nil, err
 	}
 

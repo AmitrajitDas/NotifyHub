@@ -33,6 +33,7 @@ func (p *Provider) Send(ctx context.Context, n domain.Notification) error {
 }
 
 // Channel returns the delivery channel this provider handles.
-func (p *Provider) Channel() domain.Channel {
-	return p.channel
-}
+func (p *Provider) Channel() domain.Channel { return p.channel }
+
+// Name returns the provider identifier used in metric labels.
+func (p *Provider) Name() string { return "mock" }

@@ -2,17 +2,14 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# notifyhub-api and notifyhub-worker metrics are scraped by otel-collector
+# (prometheus receiver) and forwarded here via remote-write. Direct scrape
+# of those targets is intentionally absent to avoid duplicate time series.
 scrape_configs:
-  - job_name: "notifyhub-api"
-    static_configs:
-      - targets: ["api:8080"]
-    metrics_path: /metrics
-
-  - job_name: "notifyhub-worker"
-    static_configs:
-      - targets: ["worker:9091"]
-    metrics_path: /metrics
-
   - job_name: "prometheus"
     static_configs:
       - targets: ["localhost:9090"]
+
+  - job_name: "otel-collector"
+    static_configs:
+      - targets: ["otel-collector:8889"]

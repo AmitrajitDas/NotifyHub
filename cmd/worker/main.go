@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -17,6 +19,7 @@ import (
 	"github.com/amitrajitdas31/notifyhub/internal/config"
 	"github.com/amitrajitdas31/notifyhub/internal/db"
 	"github.com/amitrajitdas31/notifyhub/internal/domain"
+	"github.com/amitrajitdas31/notifyhub/internal/observability"
 	"github.com/amitrajitdas31/notifyhub/internal/provider"
 	fcmprovider "github.com/amitrajitdas31/notifyhub/internal/provider/fcm"
 	mockprovider "github.com/amitrajitdas31/notifyhub/internal/provider/mock"
@@ -28,6 +31,12 @@ import (
 	"github.com/amitrajitdas31/notifyhub/internal/worker"
 )
 
+// version and commit are injected at build time via -ldflags.
+var (
+	version = "dev"
+	commit  = "unknown"
+)
+
 const (
 	kafkaGroupID      = "notifyhub-worker"
 	schedulerInterval = 15 * time.Second
@@ -35,18 +44,34 @@ const (
 )
 
 func main() {
-	// 1. Config
+	// 1. Config, logger, tracing, metrics
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
+	cfg.ServiceVersion = version
+	cfg.GitCommit = commit
 
-	// 2. Logger
 	logger := buildLogger(cfg.LogLevel)
 	slog.SetDefault(logger)
 
-	// 3. Postgres
+	shutdownTracer, err := observability.InitTracer(context.Background(), observability.TracingConfig{
+		Endpoint:    cfg.OTELEndpoint,
+		Insecure:    cfg.OTELInsecure,
+		ServiceName: "notifyhub-worker",
+		Version:     cfg.ServiceVersion,
+		Environment: cfg.Environment,
+		SampleRatio: cfg.OTELSampleRatio,
+	})
+	if err != nil {
+		logger.Error("failed to init tracer", "error", err)
+		os.Exit(1)
+	}
+
+	metrics := observability.NewMetrics(cfg.ServiceVersion, cfg.GitCommit, cfg.Environment)
+
+	// 2. Postgres
 	pool, err := buildPool(cfg)
 	if err != nil {
 		logger.Error("failed to connect to postgres", "error", err)
@@ -55,42 +80,33 @@ func main() {
 	defer pool.Close()
 	logger.Info("postgres connected")
 
-	// 4. Redis
-	redisOpts, err := redis.ParseURL(cfg.RedisURL)
+	// 3. Redis
+	redisClient, err := buildRedis(cfg)
 	if err != nil {
-		logger.Error("invalid redis url", "error", err)
-		os.Exit(1)
-	}
-	if cfg.RedisPassword != "" {
-		redisOpts.Password = cfg.RedisPassword
-	}
-	redisClient := redis.NewClient(redisOpts)
-	defer redisClient.Close()
-
-	if err := redisClient.Ping(context.Background()).Err(); err != nil {
 		logger.Error("failed to connect to redis", "error", err)
 		os.Exit(1)
 	}
+	defer redisClient.Close()
 	logger.Info("redis connected")
 
-	// 5. sqlc queries
+	// 4. sqlc queries
 	sqlDB := stdlib.OpenDBFromPool(pool)
 	defer sqlDB.Close()
 	queries := db.New(sqlDB)
 
-	// 6. Repositories
+	// 5. Repositories
 	notifRepo := repository.NewNotificationRepository(queries)
 	delivRepo := repository.NewDeliveryRepository(queries)
 	prefRepo := repository.NewPreferenceRepository(queries)
 	templateRepo := repository.NewTemplateRepository(queries)
 
-	// 7. Services
+	// 6. Services
 	validate := validator.New()
 	preferenceSvc := service.NewPreferenceService(prefRepo, validate)
 	rateLimitSvc := service.NewRateLimitService(redisClient)
-	templateSvc := service.NewTemplateService(templateRepo, validate)
+	templateSvc := service.NewTemplateService(templateRepo, validate, metrics)
 
-	// 8. Kafka producer (used by the scheduler to enqueue due notifications)
+	// 7. Kafka producer (scheduler uses this to enqueue due notifications)
 	producer := queue.NewProducer(cfg.KafkaBrokers, logger)
 	defer func() {
 		if err := producer.Close(); err != nil {
@@ -98,157 +114,188 @@ func main() {
 		}
 	}()
 
-	// 9. Provider registry
-	// Registers real providers if credentials are configured, falls back to mock for local dev.
-	registry := provider.NewRegistry()
+	// 8. Provider registry, processor, scheduler
+	registry := buildRegistry(cfg, logger)
 
-	// Email: SES if configured, else mock
-	if cfg.SESFromEmail != "" {
-		emailProvider, err := sesprovider.New(context.Background(), cfg.SESRegion, cfg.SESFromEmail, logger)
-		if err != nil {
-			logger.Error("failed to initialize SES provider, falling back to mock", "error", err)
-			registry.Register(mockprovider.New(domain.ChannelEmail, logger))
-		} else {
-			registry.Register(emailProvider)
-			logger.Info("registered SES email provider")
-		}
-	} else {
-		registry.Register(mockprovider.New(domain.ChannelEmail, logger))
-	}
+	processor := worker.NewProcessor(worker.ProcessorDeps{
+		NotificationRepo: notifRepo,
+		DeliveryRepo:     delivRepo,
+		Preferences:      preferenceSvc,
+		RateLimit:        rateLimitSvc,
+		Templates:        templateSvc,
+		Registry:         registry,
+		Metrics:          metrics,
+		RateCaps: map[domain.Channel]int{
+			domain.ChannelEmail: cfg.RateLimitEmailPerHour,
+			domain.ChannelPush:  cfg.RateLimitPushPerHour,
+			domain.ChannelSMS:   cfg.RateLimitSMSPerHour,
+			domain.ChannelInApp: cfg.RateLimitInAppPerHour,
+		},
+		RetryDelay: time.Duration(cfg.WorkerRetryBaseDelayMS) * time.Millisecond,
+		Logger:     logger,
+	})
 
-	// Push: FCM if configured, else mock
-	if cfg.FCMCredentialsFile != "" {
-		pushProvider, err := fcmprovider.New(context.Background(), cfg.FCMCredentialsFile, logger)
-		if err != nil {
-			logger.Error("failed to initialize FCM provider, falling back to mock", "error", err)
-			registry.Register(mockprovider.New(domain.ChannelPush, logger))
-		} else {
-			registry.Register(pushProvider)
-			logger.Info("registered FCM push provider")
-		}
-	} else {
-		registry.Register(mockprovider.New(domain.ChannelPush, logger))
-	}
+	scheduler := service.NewScheduler(notifRepo, producer, schedulerInterval, schedulerBatch, cfg.WorkerRetryMaxAttempts, logger)
 
-	// SMS: Twilio if configured, else mock
-	if cfg.TwilioAccountSID != "" && cfg.TwilioAuthToken != "" {
-		smsProvider, err := twilioprovider.New(
-			cfg.TwilioAccountSID,
-			cfg.TwilioAuthToken,
-			cfg.TwilioFromNumber,
-			"",
-			logger,
-		)
-		if err != nil {
-			logger.Error("failed to initialize Twilio provider, falling back to mock", "error", err)
-			registry.Register(mockprovider.New(domain.ChannelSMS, logger))
-		} else {
-			registry.Register(smsProvider)
-			logger.Info("registered Twilio SMS provider")
-		}
-	} else {
-		registry.Register(mockprovider.New(domain.ChannelSMS, logger))
-	}
-
-	// InApp: always mock (no external provider)
-	registry.Register(mockprovider.New(domain.ChannelInApp, logger))
-
-	// 10. Per-channel rate caps (notifications per hour)
-	rateCaps := map[domain.Channel]int{
-		domain.ChannelEmail: cfg.RateLimitEmailPerHour,
-		domain.ChannelPush:  cfg.RateLimitPushPerHour,
-		domain.ChannelSMS:   cfg.RateLimitSMSPerHour,
-		domain.ChannelInApp: cfg.RateLimitInAppPerHour,
-	}
-
-	// 11. Processor (stateless — shared safely across all pools)
-	processor := worker.NewProcessor(
-		notifRepo,
-		delivRepo,
-		preferenceSvc,
-		rateLimitSvc,
-		templateSvc,
-		registry,
-		rateCaps,
-		time.Duration(cfg.WorkerRetryBaseDelayMS)*time.Millisecond,
-		logger,
+	// 9. Health checker — shared by admin server and used for /readyz
+	checker := observability.NewChecker(3*time.Second,
+		observability.PostgresProbe(pool),
+		observability.RedisProbe(redisClient),
+		observability.KafkaProbe(cfg.KafkaBrokers),
 	)
 
-	// 12. One pool per channel, each with its own consumer
-	type poolCfg struct {
-		channel     domain.Channel
-		concurrency int
-	}
-	channelPools := []poolCfg{
-		{domain.ChannelEmail, cfg.WorkerEmailConcurrency},
-		{domain.ChannelPush, cfg.WorkerPushConcurrency},
-		{domain.ChannelSMS, cfg.WorkerSMSConcurrency},
-		{domain.ChannelInApp, cfg.WorkerInAppConcurrency},
-	}
+	// 10. Admin HTTP server — /metrics, /livez, /readyz, /health on MetricsPort
+	adminSrv := startAdminServer(cfg.MetricsPort, metrics, checker)
 
-	// 13. Scheduler
-	scheduler := service.NewScheduler(
-		notifRepo,
-		producer,
-		schedulerInterval,
-		schedulerBatch,
-		cfg.WorkerRetryMaxAttempts,
-		logger,
-	)
-
-	// 14. Root context — cancelled on SIGTERM/SIGINT
+	// 11. Root context cancelled on SIGTERM/SIGINT
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
 	logger.Info("notifyhub worker starting",
 		slog.String("env", cfg.Environment),
+		slog.String("version", version),
+		slog.String("metrics_port", cfg.MetricsPort),
 		slog.Int("email_concurrency", cfg.WorkerEmailConcurrency),
 		slog.Int("push_concurrency", cfg.WorkerPushConcurrency),
 		slog.Int("sms_concurrency", cfg.WorkerSMSConcurrency),
 		slog.Int("inapp_concurrency", cfg.WorkerInAppConcurrency),
 	)
 
-	// 15. Launch all goroutines
+	// 12. Launch pools and scheduler
 	var wg sync.WaitGroup
+	startPools(ctx, cfg, processor, logger, &wg)
+	startScheduler(ctx, scheduler, logger, &wg)
 
-	for _, pc := range channelPools {
-		consumer := queue.NewConsumer(
-			cfg.KafkaBrokers,
-			queue.TopicForChannel(pc.channel),
-			kafkaGroupID,
-			logger,
-		)
-		p := worker.NewPool(consumer, processor, pc.concurrency, logger)
+	// 13. Block until signal, then drain in order
+	<-ctx.Done()
+	logger.Info("shutdown signal received, draining...")
+
+	// Wait for all in-flight messages to finish before stopping infra.
+	wg.Wait()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := adminSrv.Shutdown(shutdownCtx); err != nil {
+		logger.Error("admin server shutdown failed", "error", err)
+	}
+
+	tracerCtx, tracerCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer tracerCancel()
+	if err := shutdownTracer(tracerCtx); err != nil {
+		logger.Error("tracer flush failed", "error", err)
+	}
+
+	logger.Info("worker stopped cleanly")
+}
+
+// startAdminServer runs /metrics, /livez, /readyz, /health on port in a goroutine.
+func startAdminServer(port string, metrics *observability.Metrics, checker *observability.Checker) *http.Server {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", metrics.Handler())
+	mux.HandleFunc("/livez", checker.Live)
+	mux.HandleFunc("/readyz", checker.Ready)
+	mux.HandleFunc("/health", checker.Health)
+
+	srv := &http.Server{
+		Addr:              ":" + port,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("admin server error", "error", err)
+		}
+	}()
+	return srv
+}
+
+// startPools launches one worker.Pool goroutine per channel.
+func startPools(ctx context.Context, cfg *config.Config, proc *worker.Processor, logger *slog.Logger, wg *sync.WaitGroup) {
+	type entry struct {
+		channel     domain.Channel
+		concurrency int
+	}
+	channels := []entry{
+		{domain.ChannelEmail, cfg.WorkerEmailConcurrency},
+		{domain.ChannelPush, cfg.WorkerPushConcurrency},
+		{domain.ChannelSMS, cfg.WorkerSMSConcurrency},
+		{domain.ChannelInApp, cfg.WorkerInAppConcurrency},
+	}
+	for _, e := range channels {
+		consumer := queue.NewConsumer(cfg.KafkaBrokers, queue.TopicForChannel(e.channel), kafkaGroupID, logger)
+		p := worker.NewPool(consumer, proc, e.concurrency, logger)
 
 		wg.Add(1)
 		go func(p *worker.Pool, ch domain.Channel) {
 			defer wg.Done()
 			logger.Info("pool started", slog.String("channel", string(ch)))
 			if err := p.Run(ctx); err != nil {
-				logger.Error("pool exited with error",
-					slog.String("channel", string(ch)),
-					slog.Any("error", err),
-				)
+				logger.Error("pool error", slog.String("channel", string(ch)), slog.Any("error", err))
 			}
 			logger.Info("pool stopped", slog.String("channel", string(ch)))
-		}(p, pc.channel)
+		}(p, e.channel)
 	}
+}
 
+// startScheduler launches the scheduler goroutine.
+func startScheduler(ctx context.Context, sched *service.Scheduler, logger *slog.Logger, wg *sync.WaitGroup) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := scheduler.Run(ctx); err != nil {
-			logger.Error("scheduler exited with error", slog.Any("error", err))
+		if err := sched.Run(ctx); err != nil {
+			logger.Error("scheduler error", slog.Any("error", err))
 		}
 	}()
+}
 
-	// 16. Block until context is cancelled (SIGTERM/SIGINT)
-	<-ctx.Done()
-	logger.Info("shutdown signal received, draining...")
+// buildRegistry registers real providers when credentials are configured,
+// falling back to the mock for any channel without credentials.
+func buildRegistry(cfg *config.Config, logger *slog.Logger) *provider.Registry {
+	reg := provider.NewRegistry()
+	reg.Register(buildEmailProvider(cfg, logger))
+	reg.Register(buildPushProvider(cfg, logger))
+	reg.Register(buildSMSProvider(cfg, logger))
+	reg.Register(mockprovider.New(domain.ChannelInApp, logger))
+	return reg
+}
 
-	// Wait for all pools and scheduler to finish in-flight work
-	wg.Wait()
-	logger.Info("worker stopped cleanly")
+func buildEmailProvider(cfg *config.Config, logger *slog.Logger) provider.Provider {
+	if cfg.SESFromEmail == "" {
+		return mockprovider.New(domain.ChannelEmail, logger)
+	}
+	p, err := sesprovider.New(context.Background(), cfg.SESRegion, cfg.SESFromEmail, logger)
+	if err != nil {
+		logger.Error("SES init failed, using mock", "error", err)
+		return mockprovider.New(domain.ChannelEmail, logger)
+	}
+	logger.Info("registered SES email provider")
+	return p
+}
+
+func buildPushProvider(cfg *config.Config, logger *slog.Logger) provider.Provider {
+	if cfg.FCMCredentialsFile == "" {
+		return mockprovider.New(domain.ChannelPush, logger)
+	}
+	p, err := fcmprovider.New(context.Background(), cfg.FCMCredentialsFile, logger)
+	if err != nil {
+		logger.Error("FCM init failed, using mock", "error", err)
+		return mockprovider.New(domain.ChannelPush, logger)
+	}
+	logger.Info("registered FCM push provider")
+	return p
+}
+
+func buildSMSProvider(cfg *config.Config, logger *slog.Logger) provider.Provider {
+	if cfg.TwilioAccountSID == "" || cfg.TwilioAuthToken == "" {
+		return mockprovider.New(domain.ChannelSMS, logger)
+	}
+	p, err := twilioprovider.New(cfg.TwilioAccountSID, cfg.TwilioAuthToken, cfg.TwilioFromNumber, "", logger)
+	if err != nil {
+		logger.Error("Twilio init failed, using mock", "error", err)
+		return mockprovider.New(domain.ChannelSMS, logger)
+	}
+	logger.Info("registered Twilio SMS provider")
+	return p
 }
 
 func buildLogger(level string) *slog.Logger {
@@ -263,7 +310,7 @@ func buildLogger(level string) *slog.Logger {
 	default:
 		l = slog.LevelInfo
 	}
-	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: l}))
+	return observability.NewLogger(l)
 }
 
 func buildPool(cfg *config.Config) (*pgxpool.Pool, error) {
@@ -286,4 +333,20 @@ func buildPool(cfg *config.Config) (*pgxpool.Pool, error) {
 		return nil, err
 	}
 	return p, nil
+}
+
+func buildRedis(cfg *config.Config) (*redis.Client, error) {
+	opts, err := redis.ParseURL(cfg.RedisURL)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.RedisPassword != "" {
+		opts.Password = cfg.RedisPassword
+	}
+	client := redis.NewClient(opts)
+	if err := client.Ping(context.Background()).Err(); err != nil {
+		client.Close()
+		return nil, err
+	}
+	return client, nil
 }

@@ -52,6 +52,9 @@ func newWithClient(c sender, fromEmail string, logger *slog.Logger) *Provider {
 // Channel reports that this provider handles email.
 func (p *Provider) Channel() domain.Channel { return domain.ChannelEmail }
 
+// Name returns the provider identifier used in metric labels.
+func (p *Provider) Name() string { return "ses" }
+
 // Send builds a SendEmail request and classifies failures for the worker.
 func (p *Provider) Send(ctx context.Context, n domain.Notification) error {
 	subject, body, isHTML := extractContent(n.Payload)

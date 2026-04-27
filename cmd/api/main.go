@@ -100,6 +100,7 @@ func main() {
 	notifRepo := repository.NewNotificationRepository(queries)
 	templateRepo := repository.NewTemplateRepository(queries)
 	preferenceRepo := repository.NewPreferenceRepository(queries)
+	dlqRepo := repository.NewDeadLetterRepository(queries)
 
 	// 9. Kafka producer
 	publisher := queue.NewProducer(cfg.KafkaBrokers, logger)
@@ -129,6 +130,7 @@ func main() {
 	templateHandler := handler.NewTemplateHandler(templateSvc)
 	prefHandler := handler.NewPreferenceHandler(preferenceSvc)
 	tenantHandler := handler.NewTenantHandler(tenantSvc)
+	dlqHandler := handler.NewDLQHandler(dlqRepo, publisher, cfg.WorkerRetryMaxAttempts)
 
 	// 13. Router
 	router := api.NewRouter(api.RouterDeps{
@@ -143,6 +145,7 @@ func main() {
 		Template:     templateHandler,
 		Preference:   prefHandler,
 		Tenant:       tenantHandler,
+		DLQ:          dlqHandler,
 	})
 
 	// 14. HTTP server

@@ -63,6 +63,13 @@ type Metrics struct {
 
 	// Build / runtime info — set once at startup, never changes.
 	BuildInfo *prometheus.GaugeVec
+
+	// DLQ telemetry.
+	DLQPublished    *prometheus.CounterVec // labels: channel, reason
+	DLQPublishErrors *prometheus.CounterVec // labels: channel
+	DLQPersisted    *prometheus.CounterVec // labels: channel
+	DLQReplayed     *prometheus.CounterVec // labels: channel
+	DLQDepth        *prometheus.GaugeVec  // labels: channel
 }
 
 // NewMetrics builds a Metrics struct backed by a fresh registry.
@@ -185,6 +192,52 @@ func NewMetrics(version, commit, env string) *Metrics {
 			},
 			[]string{"version", "commit", "env"},
 		),
+
+		DLQPublished: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "notifyhub",
+				Subsystem: "dlq",
+				Name:      "published_total",
+				Help:      "Messages successfully published to a DLQ topic.",
+			},
+			[]string{"channel", "reason"},
+		),
+		DLQPublishErrors: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "notifyhub",
+				Subsystem: "dlq",
+				Name:      "publish_errors_total",
+				Help:      "Failed DLQ publish attempts (message still marked failed).",
+			},
+			[]string{"channel"},
+		),
+		DLQPersisted: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "notifyhub",
+				Subsystem: "dlq",
+				Name:      "persisted_total",
+				Help:      "DLQ messages persisted to dead_letter_messages table.",
+			},
+			[]string{"channel"},
+		),
+		DLQReplayed: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "notifyhub",
+				Subsystem: "dlq",
+				Name:      "replayed_total",
+				Help:      "DLQ messages replayed via admin API.",
+			},
+			[]string{"channel"},
+		),
+		DLQDepth: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: "notifyhub",
+				Subsystem: "dlq",
+				Name:      "depth",
+				Help:      "Current number of unreplayed dead-letter messages per channel.",
+			},
+			[]string{"channel"},
+		),
 	}
 
 	reg.MustRegister(
@@ -195,6 +248,8 @@ func NewMetrics(version, commit, env string) *Metrics {
 		m.TemplateRenderDur,
 		m.RateLimitDecisions,
 		m.BuildInfo,
+		m.DLQPublished, m.DLQPublishErrors,
+		m.DLQPersisted, m.DLQReplayed, m.DLQDepth,
 	)
 
 	m.BuildInfo.WithLabelValues(version, commit, env).Set(1)

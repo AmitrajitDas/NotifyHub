@@ -20,6 +20,11 @@ import (
 	"github.com/amitrajitdas31/notifyhub/internal/service"
 )
 
+// DLQPublisher publishes a failed message to the channel's dead-letter topic.
+type DLQPublisher interface {
+	PublishDLQ(ctx context.Context, msg queue.DLQMessage) error
+}
+
 // ProcessorDeps groups all dependencies required to build a Processor.
 // Using a struct keeps the constructor signature within linter limits and
 // makes the call site self-documenting.
@@ -34,6 +39,8 @@ type ProcessorDeps struct {
 	RateCaps         map[domain.Channel]int // per-channel hourly cap from config
 	RetryDelay       time.Duration          // base delay; actual = RetryDelay * 2^(attempt-1)
 	Logger           *slog.Logger
+	DLQPublisher     DLQPublisher // nil disables DLQ routing
+	DLQEnabled       bool
 }
 
 // Processor runs the full delivery pipeline for a single queue.Message.
@@ -159,6 +166,7 @@ func (p *Processor) deliver(ctx context.Context, msg queue.Message, n *domain.No
 			log.ErrorContext(ctx, "template render failed", slog.Any("error", err))
 			errMsg := err.Error()
 			p.logDelivery(ctx, msg, n, domain.DeliveryFailed, &errMsg, nil, nil)
+			p.deadLetter(ctx, msg, domain.DLQReasonTemplateRender, errMsg)
 			p.updateStatus(ctx, n.ID, domain.StatusFailed)
 			return observability.StatusFailed, nil
 		}
@@ -175,6 +183,7 @@ func (p *Processor) deliver(ctx context.Context, msg queue.Message, n *domain.No
 		log.ErrorContext(ctx, "no provider for channel")
 		errMsg := err.Error()
 		p.logDelivery(ctx, msg, n, domain.DeliveryFailed, &errMsg, nil, nil)
+		p.deadLetter(ctx, msg, domain.DLQReasonNoProvider, errMsg)
 		p.updateStatus(ctx, n.ID, domain.StatusFailed)
 		return observability.StatusFailed, nil
 	}
@@ -184,7 +193,12 @@ func (p *Processor) deliver(ctx context.Context, msg queue.Message, n *domain.No
 	// ── Step 7: delivery log + final status ───────────────────────────────────
 	if sendErr != nil {
 		errMsg := sendErr.Error()
+		reason := domain.DLQReasonRetriesExhausted
+		if provider.IsPermanent(sendErr) {
+			reason = domain.DLQReasonPermanent
+		}
 		p.logDelivery(ctx, msg, n, domain.DeliveryFailed, &errMsg, nil, nil)
+		p.deadLetter(ctx, msg, reason, errMsg)
 		p.updateStatus(ctx, n.ID, domain.StatusFailed)
 		log.ErrorContext(ctx, "notification failed", slog.Any("error", sendErr))
 		return observability.StatusFailed, nil
@@ -247,6 +261,33 @@ func (p *Processor) sendWithRetry(
 		}
 		attempt++
 	}
+}
+
+// deadLetter publishes msg to the channel's DLQ topic. Non-fatal: a publish
+// failure is logged and counted but does not block the offset commit — the
+// notification is already marked failed and the delivery log is written.
+func (p *Processor) deadLetter(ctx context.Context, msg queue.Message, reason, errMsg string) {
+	if !p.deps.DLQEnabled || p.deps.DLQPublisher == nil {
+		return
+	}
+	dlq := queue.DLQMessage{
+		Original:       msg,
+		OriginalTopic:  queue.TopicForChannel(msg.Channel),
+		FailureReason:  reason,
+		ErrorMessage:   errMsg,
+		LastAttempt:    msg.Attempt,
+		DeadLetteredAt: time.Now().UTC(),
+	}
+	if err := p.deps.DLQPublisher.PublishDLQ(ctx, dlq); err != nil {
+		p.deps.Logger.ErrorContext(ctx, "dlq publish failed",
+			slog.String("channel", string(msg.Channel)),
+			slog.String("reason", reason),
+			slog.Any("error", err),
+		)
+		p.deps.Metrics.DLQPublishErrors.WithLabelValues(string(msg.Channel)).Inc()
+		return
+	}
+	p.deps.Metrics.DLQPublished.WithLabelValues(string(msg.Channel), reason).Inc()
 }
 
 // setSpanErr records the error and sets an error status on the span.

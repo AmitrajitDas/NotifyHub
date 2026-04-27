@@ -31,3 +31,19 @@ type Message struct {
 func TopicForChannel(ch domain.Channel) string {
 	return fmt.Sprintf("notifyhub.notifications.%s", ch)
 }
+
+// DLQTopicForChannel returns the dead-letter topic for the given channel.
+func DLQTopicForChannel(ch domain.Channel) string {
+	return TopicForChannel(ch) + ".dlq"
+}
+
+// DLQMessage is the Kafka envelope written to a DLQ topic when a notification
+// exhausts all delivery attempts or encounters a permanent provider failure.
+type DLQMessage struct {
+	Original       Message   `json:"original"`
+	OriginalTopic  string    `json:"original_topic"`
+	FailureReason  string    `json:"failure_reason"`
+	ErrorMessage   string    `json:"error_message"`
+	LastAttempt    int       `json:"last_attempt"`
+	DeadLetteredAt time.Time `json:"dead_lettered_at"`
+}

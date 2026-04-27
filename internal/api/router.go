@@ -29,6 +29,7 @@ type RouterDeps struct {
 	Template     *handler.TemplateHandler
 	Preference   *handler.PreferenceHandler
 	Tenant       *handler.TenantHandler
+	DLQ          *handler.DLQHandler
 }
 
 func NewRouter(deps RouterDeps) http.Handler {
@@ -59,6 +60,14 @@ func NewRouter(deps RouterDeps) http.Handler {
 			r.Post("/", deps.Tenant.CreateTenant)
 			r.Post("/{id}/api-keys", deps.Tenant.CreateAPIKey)
 		})
+		if deps.DLQ != nil {
+			r.Route("/internal/dlq", func(r chi.Router) {
+				r.Get("/", deps.DLQ.List)
+				r.Get("/{id}", deps.DLQ.GetByID)
+				r.Post("/{id}/replay", deps.DLQ.Replay)
+				r.Delete("/{id}", deps.DLQ.Delete)
+			})
+		}
 	})
 
 	// ── Authenticated API routes ──────────────────────────────────────────────

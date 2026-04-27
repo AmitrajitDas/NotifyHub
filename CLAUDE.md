@@ -79,6 +79,7 @@ domain  ←  service  ←  handler (HTTP)
 Each channel runs an independent `worker.Pool` with configurable goroutine concurrency. The pool's fetch loop calls `consumer.Fetch()` (blocks), then fans work out to goroutines.
 
 `Processor.Process()` runs a 7-step pipeline per message:
+
 1. Fetch notification from DB
 2. Mark status `processing`
 3. **Preference check** — `PreferenceService.IsAllowed()` evaluates enabled flag, quiet hours (with IANA timezone), frequency caps; drop if denied
@@ -160,11 +161,11 @@ Full specification: `NOTIFICATION_SYSTEM_PLAN.md`
 - [x] Deployments — Dockerfile, docker-compose, Prometheus config, Alloy, Loki, Tempo, OTel Collector configs
 - [x] Observability — `internal/observability/` (metrics, tracing, health, logging, span); metrics middleware at `internal/api/middleware/metrics.go`
 - [x] Docs — db-schema, deployment, production-grade
+- [x] **DLQ / poison-message handling** — per-channel dead-letter topics `notifyhub.notifications.{channel}.dlq`; processor routes to DLQ after max retry attempts or on permanent provider failure with full message + error context; DLQ consumer (`internal/worker/dlq_consumer.go`) persists to `dead_letter_messages` table; admin endpoints `GET /internal/dlq`, `GET /internal/dlq/:id`, `POST /internal/dlq/:id/replay`, `DELETE /internal/dlq/:id`; Prometheus metrics on DLQ depth, published, persisted, replayed per channel
 
 ### Remaining
 
 - [ ] **In-app channel** — `inapp_messages` table (id, tenant_id, recipient_id, title, body, payload, read_at, created_at) with `(tenant_id, recipient_id, read_at, created_at DESC)` index; `internal/provider/inapp/` writes to inbox; fan-out service (`internal/realtime/`) using WebSocket or SSE with Redis pub/sub for cross-instance delivery; `GET /api/v1/inbox`, `POST /api/v1/inbox/:id/read`, `POST /api/v1/inbox/read-all`, `GET /api/v1/inbox/stream` (SSE) endpoints; presence/connection registry keyed by `{tenant_id}:{recipient_id}`
-- [ ] **DLQ / poison-message handling** — per-channel dead-letter topics `notifyhub.notifications.{channel}.dlq`; processor routes to DLQ after max retry attempts or on permanent provider failure with full message + error context; DLQ consumer persists to `dead_letter_messages` table (id, tenant_id, original_topic, payload, error, attempts, created_at); admin endpoints `GET /internal/dlq`, `POST /internal/dlq/:id/replay`, `DELETE /internal/dlq/:id`; metrics on DLQ depth per channel
 - [ ] **CI/CD** — `.github/workflows/ci.yml` (lint + test + build), `.github/workflows/docker.yml` (build + push)
 - [ ] **Load tests** — `scripts/loadtest/send_notification.js` (k6)
 - [ ] **ADRs** — `docs/adr/` (Go over Node, Kafka over RabbitMQ, pgx over GORM, sqlc for queries)

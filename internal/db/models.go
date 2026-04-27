@@ -23,6 +23,20 @@ type ApiClient struct {
 	TenantID   uuid.NullUUID `json:"tenant_id"`
 }
 
+type DeadLetterMessage struct {
+	ID             uuid.UUID       `json:"id"`
+	TenantID       uuid.UUID       `json:"tenant_id"`
+	NotificationID uuid.UUID       `json:"notification_id"`
+	Channel        string          `json:"channel"`
+	OriginalTopic  string          `json:"original_topic"`
+	Payload        json.RawMessage `json:"payload"`
+	FailureReason  string          `json:"failure_reason"`
+	ErrorMessage   string          `json:"error_message"`
+	Attempts       int32           `json:"attempts"`
+	ReplayedAt     sql.NullTime    `json:"replayed_at"`
+	CreatedAt      time.Time       `json:"created_at"`
+}
+
 type DeliveryLog struct {
 	ID                uuid.UUID      `json:"id"`
 	NotificationID    uuid.UUID      `json:"notification_id"`

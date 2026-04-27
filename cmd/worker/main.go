@@ -99,6 +99,7 @@ func main() {
 	delivRepo := repository.NewDeliveryRepository(queries)
 	prefRepo := repository.NewPreferenceRepository(queries)
 	templateRepo := repository.NewTemplateRepository(queries)
+	dlqRepo := repository.NewDeadLetterRepository(queries)
 
 	// 6. Services
 	validate := validator.New()
@@ -131,8 +132,10 @@ func main() {
 			domain.ChannelSMS:   cfg.RateLimitSMSPerHour,
 			domain.ChannelInApp: cfg.RateLimitInAppPerHour,
 		},
-		RetryDelay: time.Duration(cfg.WorkerRetryBaseDelayMS) * time.Millisecond,
-		Logger:     logger,
+		RetryDelay:   time.Duration(cfg.WorkerRetryBaseDelayMS) * time.Millisecond,
+		Logger:       logger,
+		DLQPublisher: producer,
+		DLQEnabled:   cfg.DLQEnabled,
 	})
 
 	scheduler := service.NewScheduler(notifRepo, producer, schedulerInterval, schedulerBatch, cfg.WorkerRetryMaxAttempts, logger)
@@ -161,9 +164,10 @@ func main() {
 		slog.Int("inapp_concurrency", cfg.WorkerInAppConcurrency),
 	)
 
-	// 12. Launch pools and scheduler
+	// 12. Launch pools, DLQ consumers, and scheduler
 	var wg sync.WaitGroup
 	startPools(ctx, cfg, processor, logger, &wg)
+	startDLQConsumers(ctx, cfg, dlqRepo, metrics, logger, &wg)
 	startScheduler(ctx, scheduler, logger, &wg)
 
 	// 13. Block until signal, then drain in order
@@ -234,6 +238,33 @@ func startPools(ctx context.Context, cfg *config.Config, proc *worker.Processor,
 			}
 			logger.Info("pool stopped", slog.String("channel", string(ch)))
 		}(p, e.channel)
+	}
+}
+
+// startDLQConsumers launches one DLQConsumer goroutine per channel when enabled.
+func startDLQConsumers(ctx context.Context, cfg *config.Config, repo repository.DeadLetterRepository, metrics *observability.Metrics, logger *slog.Logger, wg *sync.WaitGroup) {
+	if !cfg.DLQConsumerEnabled {
+		return
+	}
+	channels := []domain.Channel{
+		domain.ChannelEmail,
+		domain.ChannelPush,
+		domain.ChannelSMS,
+		domain.ChannelInApp,
+	}
+	for _, ch := range channels {
+		consumer := queue.NewConsumer(cfg.KafkaBrokers, queue.DLQTopicForChannel(ch), cfg.DLQGroupID, logger)
+		dlqConsumer := worker.NewDLQConsumer(consumer, repo, metrics, logger)
+
+		wg.Add(1)
+		go func(c *worker.DLQConsumer, ch domain.Channel) {
+			defer wg.Done()
+			logger.Info("dlq consumer started", slog.String("channel", string(ch)))
+			if err := c.Run(ctx); err != nil {
+				logger.Error("dlq consumer error", slog.String("channel", string(ch)), slog.Any("error", err))
+			}
+			logger.Info("dlq consumer stopped", slog.String("channel", string(ch)))
+		}(dlqConsumer, ch)
 	}
 }
 

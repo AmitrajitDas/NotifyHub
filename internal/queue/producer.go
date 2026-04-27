@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -108,6 +109,16 @@ func ExtractTraceContext(ctx context.Context, msg kafka.Message) context.Context
 		m[h.Key] = string(h.Value)
 	}
 	return otel.GetTextMapPropagator().Extract(ctx, propagation.MapCarrier(m))
+}
+
+// PublishDLQ serialises a DLQMessage and writes it to the channel's DLQ topic.
+// The recipient ID is used as the partition key to preserve per-recipient ordering.
+func (p *Producer) PublishDLQ(ctx context.Context, msg DLQMessage) error {
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("marshal dlq message: %w", err)
+	}
+	return p.Publish(ctx, DLQTopicForChannel(msg.Original.Channel), msg.Original.RecipientID, payload)
 }
 
 // Close flushes buffered messages and closes the underlying TCP connection.

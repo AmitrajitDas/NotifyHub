@@ -12,11 +12,15 @@ import (
 
 type Querier interface {
 	CancelNotification(ctx context.Context, arg CancelNotificationParams) (Notification, error)
+	CountDeadLettersByChannel(ctx context.Context, tenantID uuid.UUID) ([]CountDeadLettersByChannelRow, error)
 	CountNotifications(ctx context.Context, arg CountNotificationsParams) (int64, error)
 	CountTemplates(ctx context.Context, arg CountTemplatesParams) (int64, error)
+	CreateDeadLetter(ctx context.Context, arg CreateDeadLetterParams) (DeadLetterMessage, error)
+	DeleteDeadLetter(ctx context.Context, arg DeleteDeadLetterParams) error
 	DeletePreference(ctx context.Context, arg DeletePreferenceParams) error
 	DeleteTemplate(ctx context.Context, arg DeleteTemplateParams) (Template, error)
 	GetAPIClientByKeyHash(ctx context.Context, apiKeyHash string) (GetAPIClientByKeyHashRow, error)
+	GetDeadLetterByID(ctx context.Context, arg GetDeadLetterByIDParams) (DeadLetterMessage, error)
 	GetLatestDeliveryLog(ctx context.Context, notificationID uuid.UUID) (DeliveryLog, error)
 	GetNotificationByID(ctx context.Context, arg GetNotificationByIDParams) (Notification, error)
 	GetNotificationByIdempotencyKey(ctx context.Context, arg GetNotificationByIdempotencyKeyParams) (Notification, error)
@@ -30,11 +34,13 @@ type Querier interface {
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (Notification, error)
 	InsertTemplate(ctx context.Context, arg InsertTemplateParams) (Template, error)
 	InsertTenant(ctx context.Context, name string) (Tenant, error)
+	ListDeadLetters(ctx context.Context, arg ListDeadLettersParams) ([]DeadLetterMessage, error)
 	ListDeliveryLogsByNotification(ctx context.Context, notificationID uuid.UUID) ([]DeliveryLog, error)
 	ListDueScheduledNotifications(ctx context.Context, limit int32) ([]Notification, error)
 	ListNotifications(ctx context.Context, arg ListNotificationsParams) ([]Notification, error)
 	ListPreferencesByUser(ctx context.Context, arg ListPreferencesByUserParams) ([]Preference, error)
 	ListTemplates(ctx context.Context, arg ListTemplatesParams) ([]Template, error)
+	MarkDeadLetterReplayed(ctx context.Context, arg MarkDeadLetterReplayedParams) error
 	UpdateNotificationStatus(ctx context.Context, arg UpdateNotificationStatusParams) (Notification, error)
 	UpdateTemplate(ctx context.Context, arg UpdateTemplateParams) (Template, error)
 	UpsertPreference(ctx context.Context, arg UpsertPreferenceParams) (Preference, error)

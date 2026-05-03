@@ -21,6 +21,7 @@ import (
 	"github.com/amitrajitdas31/notifyhub/internal/db"
 	"github.com/amitrajitdas31/notifyhub/internal/observability"
 	"github.com/amitrajitdas31/notifyhub/internal/queue"
+	"github.com/amitrajitdas31/notifyhub/internal/realtime"
 	"github.com/amitrajitdas31/notifyhub/internal/repository"
 	"github.com/amitrajitdas31/notifyhub/internal/service"
 )
@@ -101,6 +102,7 @@ func main() {
 	templateRepo := repository.NewTemplateRepository(queries)
 	preferenceRepo := repository.NewPreferenceRepository(queries)
 	dlqRepo := repository.NewDeadLetterRepository(queries)
+	inappRepo := repository.NewInAppRepository(queries)
 
 	// 9. Kafka producer
 	publisher := queue.NewProducer(cfg.KafkaBrokers, logger)
@@ -118,6 +120,14 @@ func main() {
 	notifSvc := service.NewNotificationService(notifRepo, publisher, validate, metrics, cfg.WorkerRetryMaxAttempts)
 	rateLimitSvc := service.NewRateLimitService(redisClient)
 
+	// 10b. In-app realtime hub — subscribe to Redis pub/sub
+	hub := realtime.NewHub(redisClient, logger, cfg.InAppWSBufferSize)
+	go func() {
+		if err := hub.Run(context.Background()); err != nil {
+			logger.Error("inapp hub error", "error", err)
+		}
+	}()
+
 	// 11. Health checker — probes Postgres, Redis, and Kafka
 	checker := observability.NewChecker(3*time.Second,
 		observability.PostgresProbe(pool),
@@ -131,6 +141,10 @@ func main() {
 	prefHandler := handler.NewPreferenceHandler(preferenceSvc)
 	tenantHandler := handler.NewTenantHandler(tenantSvc)
 	dlqHandler := handler.NewDLQHandler(dlqRepo, publisher, cfg.WorkerRetryMaxAttempts)
+	inboxHandler := handler.NewInboxHandler(inappRepo, hub, metrics, logger, handler.InboxHandlerConfig{
+		HeartbeatSeconds:   cfg.InAppWSHeartbeatSeconds,
+		ReadTimeoutSeconds: cfg.InAppWSReadTimeoutSeconds,
+	})
 
 	// 13. Router
 	router := api.NewRouter(api.RouterDeps{
@@ -146,6 +160,7 @@ func main() {
 		Preference:   prefHandler,
 		Tenant:       tenantHandler,
 		DLQ:          dlqHandler,
+		Inbox:        inboxHandler,
 	})
 
 	// 14. HTTP server

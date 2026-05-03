@@ -70,6 +70,12 @@ type Metrics struct {
 	DLQPersisted    *prometheus.CounterVec // labels: channel
 	DLQReplayed     *prometheus.CounterVec // labels: channel
 	DLQDepth        *prometheus.GaugeVec  // labels: channel
+
+	// In-app channel.
+	InAppPersisted    *prometheus.CounterVec // labels: tenant
+	InAppWSConnections prometheus.Gauge
+	InAppWSDropped    prometheus.Counter
+	InAppPubSubPublished prometheus.Counter
 }
 
 // NewMetrics builds a Metrics struct backed by a fresh registry.
@@ -238,6 +244,34 @@ func NewMetrics(version, commit, env string) *Metrics {
 			},
 			[]string{"channel"},
 		),
+
+		InAppPersisted: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "notifyhub",
+				Subsystem: "inapp",
+				Name:      "messages_persisted_total",
+				Help:      "In-app messages successfully persisted to the DB.",
+			},
+			[]string{"tenant"},
+		),
+		InAppWSConnections: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "notifyhub",
+			Subsystem: "inapp",
+			Name:      "ws_connections",
+			Help:      "Active WebSocket inbox connections.",
+		}),
+		InAppWSDropped: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "notifyhub",
+			Subsystem: "inapp",
+			Name:      "ws_dropped_total",
+			Help:      "Messages dropped due to full WebSocket send buffer.",
+		}),
+		InAppPubSubPublished: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "notifyhub",
+			Subsystem: "inapp",
+			Name:      "pubsub_published_total",
+			Help:      "In-app messages published to Redis pub/sub.",
+		}),
 	}
 
 	reg.MustRegister(
@@ -250,6 +284,8 @@ func NewMetrics(version, commit, env string) *Metrics {
 		m.BuildInfo,
 		m.DLQPublished, m.DLQPublishErrors,
 		m.DLQPersisted, m.DLQReplayed, m.DLQDepth,
+		m.InAppPersisted, m.InAppWSConnections,
+		m.InAppWSDropped, m.InAppPubSubPublished,
 	)
 
 	m.BuildInfo.WithLabelValues(version, commit, env).Set(1)

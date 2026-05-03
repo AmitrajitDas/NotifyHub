@@ -51,6 +51,18 @@ type DeliveryLog struct {
 	DeliveredAt       sql.NullTime   `json:"delivered_at"`
 }
 
+type InappMessage struct {
+	ID             uuid.UUID       `json:"id"`
+	TenantID       uuid.UUID       `json:"tenant_id"`
+	NotificationID uuid.NullUUID   `json:"notification_id"`
+	RecipientID    string          `json:"recipient_id"`
+	Title          string          `json:"title"`
+	Body           string          `json:"body"`
+	Payload        json.RawMessage `json:"payload"`
+	ReadAt         sql.NullTime    `json:"read_at"`
+	CreatedAt      time.Time       `json:"created_at"`
+}
+
 type Notification struct {
 	ID               uuid.UUID       `json:"id"`
 	IdempotencyKey   sql.NullString  `json:"idempotency_key"`

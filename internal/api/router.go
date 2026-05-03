@@ -30,6 +30,7 @@ type RouterDeps struct {
 	Preference   *handler.PreferenceHandler
 	Tenant       *handler.TenantHandler
 	DLQ          *handler.DLQHandler
+	Inbox        *handler.InboxHandler
 }
 
 func NewRouter(deps RouterDeps) http.Handler {
@@ -102,6 +103,17 @@ func NewRouter(deps RouterDeps) http.Handler {
 				r.Put("/{channel}", deps.Preference.Upsert)
 				r.Delete("/{channel}", deps.Preference.Delete)
 			})
+
+			// In-app inbox
+			if deps.Inbox != nil {
+				r.Route("/inbox", func(r chi.Router) {
+					r.Get("/", deps.Inbox.List)
+					r.Get("/unread-count", deps.Inbox.UnreadCount)
+					r.Post("/read-all", deps.Inbox.MarkAllRead)
+					r.Post("/{id}/read", deps.Inbox.MarkRead)
+					r.Get("/stream", deps.Inbox.Stream)
+				})
+			}
 		})
 	})
 

@@ -46,6 +46,7 @@ const (
 
 type Notification struct {
 	ID               uuid.UUID          `json:"id"`
+	TenantID         uuid.UUID          `json:"tenant_id"`
 	IdempotencyKey   *string            `json:"idempotency_key,omitempty"`
 	Type             string             `json:"type"`
 	Channel          Channel            `json:"channel"`

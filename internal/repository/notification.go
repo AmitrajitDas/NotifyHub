@@ -167,8 +167,13 @@ func (r *postgresNotificationRepo) ListDueScheduled(ctx context.Context, limit i
 }
 
 func dbNotificationToDomain(n db.Notification) domain.Notification {
+	var tenantID uuid.UUID
+	if n.TenantID.Valid {
+		tenantID = n.TenantID.UUID
+	}
 	return domain.Notification{
 		ID:               n.ID,
+		TenantID:         tenantID,
 		IdempotencyKey:   fromNullString(n.IdempotencyKey),
 		Type:             n.Type,
 		Channel:          domain.Channel(n.Channel),

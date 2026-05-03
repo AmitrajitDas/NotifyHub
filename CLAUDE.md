@@ -162,11 +162,12 @@ Full specification: `NOTIFICATION_SYSTEM_PLAN.md`
 - [x] Observability — `internal/observability/` (metrics, tracing, health, logging, span); metrics middleware at `internal/api/middleware/metrics.go`
 - [x] Docs — db-schema, deployment, production-grade
 - [x] **DLQ / poison-message handling** — per-channel dead-letter topics `notifyhub.notifications.{channel}.dlq`; processor routes to DLQ after max retry attempts or on permanent provider failure with full message + error context; DLQ consumer (`internal/worker/dlq_consumer.go`) persists to `dead_letter_messages` table; admin endpoints `GET /internal/dlq`, `GET /internal/dlq/:id`, `POST /internal/dlq/:id/replay`, `DELETE /internal/dlq/:id`; Prometheus metrics on DLQ depth, published, persisted, replayed per channel
+- [x] **In-app channel** — `inapp_messages` table (migration 000004); `internal/provider/inapp/` persists to DB + publishes to Redis pub/sub; fan-out via `internal/realtime/Hub` (WebSocket, `coder/websocket`); `GET /api/v1/inbox`, `GET /api/v1/inbox/unread-count`, `POST /api/v1/inbox/{id}/read`, `POST /api/v1/inbox/read-all`, `GET /api/v1/inbox/stream` (WebSocket); recipient identity via `X-Recipient-ID` header; presence registry keyed by `{tenant_id}:{recipient_id}`; Prometheus metrics for persisted/ws-connections/ws-dropped/pubsub-published
 
 ### Remaining
 
-- [ ] **In-app channel** — `inapp_messages` table (id, tenant_id, recipient_id, title, body, payload, read_at, created_at) with `(tenant_id, recipient_id, read_at, created_at DESC)` index; `internal/provider/inapp/` writes to inbox; fan-out service (`internal/realtime/`) using WebSocket or SSE with Redis pub/sub for cross-instance delivery; `GET /api/v1/inbox`, `POST /api/v1/inbox/:id/read`, `POST /api/v1/inbox/read-all`, `GET /api/v1/inbox/stream` (SSE) endpoints; presence/connection registry keyed by `{tenant_id}:{recipient_id}`
 - [ ] **CI/CD** — `.github/workflows/ci.yml` (lint + test + build), `.github/workflows/docker.yml` (build + push)
 - [ ] **Load tests** — `scripts/loadtest/send_notification.js` (k6)
 - [ ] **ADRs** — `docs/adr/` (Go over Node, Kafka over RabbitMQ, pgx over GORM, sqlc for queries)
 - [ ] **OpenAPI spec** — `docs/api.yaml`
+- [ ] **Kubernetes / Helm** — `charts/notifyhub/` (Helm chart for `api` + `worker`); `deploy/kind-config.yaml` (local); `deploy/eksctl-config.yaml` (EKS reference); infra (Kafka, Redis, Postgres) via Bitnami charts locally / managed services on EKS; HPA per service; Ingress via nginx; GHA `deploy.yml` (`helm upgrade --install` on merge to main). See `docs/k8s-learning.md` for prerequisite concepts.

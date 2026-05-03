@@ -50,6 +50,11 @@ type Config struct {
 	RateLimitSMSPerHour   int
 	RateLimitInAppPerHour int
 
+	// In-app WebSocket
+	InAppWSHeartbeatSeconds  int
+	InAppWSBufferSize        int
+	InAppWSReadTimeoutSeconds int
+
 	// Admin
 	AdminToken string
 
@@ -155,6 +160,15 @@ func Load() (*Config, error) {
 	}
 	if cfg.RateLimitInAppPerHour, err = getEnvInt("RATELIMIT_INAPP_PER_HOUR", 50); err != nil {
 		return nil, fmt.Errorf("RATELIMIT_INAPP_PER_HOUR: %w", err)
+	}
+	if cfg.InAppWSHeartbeatSeconds, err = getEnvInt("INAPP_WS_HEARTBEAT_SECONDS", 25); err != nil {
+		return nil, fmt.Errorf("INAPP_WS_HEARTBEAT_SECONDS: %w", err)
+	}
+	if cfg.InAppWSBufferSize, err = getEnvInt("INAPP_WS_BUFFER_SIZE", 32); err != nil {
+		return nil, fmt.Errorf("INAPP_WS_BUFFER_SIZE: %w", err)
+	}
+	if cfg.InAppWSReadTimeoutSeconds, err = getEnvInt("INAPP_WS_READ_TIMEOUT_SECONDS", 60); err != nil {
+		return nil, fmt.Errorf("INAPP_WS_READ_TIMEOUT_SECONDS: %w", err)
 	}
 
 	if cfg.OTELSampleRatio, err = getEnvFloat("OTEL_TRACES_SAMPLER_ARG", 0.1); err != nil {

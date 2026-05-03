@@ -22,6 +22,7 @@ import (
 	"github.com/amitrajitdas31/notifyhub/internal/observability"
 	"github.com/amitrajitdas31/notifyhub/internal/provider"
 	fcmprovider "github.com/amitrajitdas31/notifyhub/internal/provider/fcm"
+	inappprovider "github.com/amitrajitdas31/notifyhub/internal/provider/inapp"
 	mockprovider "github.com/amitrajitdas31/notifyhub/internal/provider/mock"
 	sesprovider "github.com/amitrajitdas31/notifyhub/internal/provider/ses"
 	twilioprovider "github.com/amitrajitdas31/notifyhub/internal/provider/twilio"
@@ -100,6 +101,7 @@ func main() {
 	prefRepo := repository.NewPreferenceRepository(queries)
 	templateRepo := repository.NewTemplateRepository(queries)
 	dlqRepo := repository.NewDeadLetterRepository(queries)
+	inappRepo := repository.NewInAppRepository(queries)
 
 	// 6. Services
 	validate := validator.New()
@@ -116,7 +118,7 @@ func main() {
 	}()
 
 	// 8. Provider registry, processor, scheduler
-	registry := buildRegistry(cfg, logger)
+	registry := buildRegistry(cfg, logger, inappRepo, redisClient)
 
 	processor := worker.NewProcessor(worker.ProcessorDeps{
 		NotificationRepo: notifRepo,
@@ -281,12 +283,12 @@ func startScheduler(ctx context.Context, sched *service.Scheduler, logger *slog.
 
 // buildRegistry registers real providers when credentials are configured,
 // falling back to the mock for any channel without credentials.
-func buildRegistry(cfg *config.Config, logger *slog.Logger) *provider.Registry {
+func buildRegistry(cfg *config.Config, logger *slog.Logger, inappRepo repository.InAppRepository, rdb *redis.Client) *provider.Registry {
 	reg := provider.NewRegistry()
 	reg.Register(buildEmailProvider(cfg, logger))
 	reg.Register(buildPushProvider(cfg, logger))
 	reg.Register(buildSMSProvider(cfg, logger))
-	reg.Register(mockprovider.New(domain.ChannelInApp, logger))
+	reg.Register(inappprovider.New(inappRepo, rdb, logger))
 	return reg
 }
 

@@ -29,8 +29,9 @@ type RouterDeps struct {
 	Template     *handler.TemplateHandler
 	Preference   *handler.PreferenceHandler
 	Tenant       *handler.TenantHandler
-	DLQ          *handler.DLQHandler
-	Inbox        *handler.InboxHandler
+	DLQ         *handler.DLQHandler
+	Inbox       *handler.InboxHandler
+	DeviceToken *handler.DeviceTokenHandler
 }
 
 func NewRouter(deps RouterDeps) http.Handler {
@@ -103,6 +104,14 @@ func NewRouter(deps RouterDeps) http.Handler {
 				r.Put("/{channel}", deps.Preference.Upsert)
 				r.Delete("/{channel}", deps.Preference.Delete)
 			})
+
+			// Device tokens (FCM push)
+			if deps.DeviceToken != nil {
+				r.Route("/device-tokens", func(r chi.Router) {
+					r.Post("/", deps.DeviceToken.Register)
+					r.Delete("/{token}", deps.DeviceToken.Deregister)
+				})
+			}
 
 			// In-app inbox
 			if deps.Inbox != nil {

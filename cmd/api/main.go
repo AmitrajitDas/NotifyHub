@@ -103,6 +103,7 @@ func main() {
 	preferenceRepo := repository.NewPreferenceRepository(queries)
 	dlqRepo := repository.NewDeadLetterRepository(queries)
 	inappRepo := repository.NewInAppRepository(queries)
+	deviceTokenRepo := repository.NewDeviceTokenRepository(queries)
 
 	// 9. Kafka producer
 	publisher := queue.NewProducer(cfg.KafkaBrokers, logger)
@@ -119,6 +120,7 @@ func main() {
 	preferenceSvc := service.NewPreferenceService(preferenceRepo, validate)
 	notifSvc := service.NewNotificationService(notifRepo, publisher, validate, metrics, cfg.WorkerRetryMaxAttempts)
 	rateLimitSvc := service.NewRateLimitService(redisClient)
+	deviceTokenSvc := service.NewDeviceTokenService(deviceTokenRepo, validate)
 
 	// 10b. In-app realtime hub — subscribe to Redis pub/sub
 	hub := realtime.NewHub(redisClient, logger, cfg.InAppWSBufferSize)
@@ -141,6 +143,7 @@ func main() {
 	prefHandler := handler.NewPreferenceHandler(preferenceSvc)
 	tenantHandler := handler.NewTenantHandler(tenantSvc)
 	dlqHandler := handler.NewDLQHandler(dlqRepo, publisher, cfg.WorkerRetryMaxAttempts)
+	deviceTokenHandler := handler.NewDeviceTokenHandler(deviceTokenSvc)
 	inboxHandler := handler.NewInboxHandler(inappRepo, hub, metrics, logger, handler.InboxHandlerConfig{
 		HeartbeatSeconds:   cfg.InAppWSHeartbeatSeconds,
 		ReadTimeoutSeconds: cfg.InAppWSReadTimeoutSeconds,
@@ -160,7 +163,8 @@ func main() {
 		Preference:   prefHandler,
 		Tenant:       tenantHandler,
 		DLQ:          dlqHandler,
-		Inbox:        inboxHandler,
+		Inbox:       inboxHandler,
+		DeviceToken: deviceTokenHandler,
 	})
 
 	// 14. HTTP server

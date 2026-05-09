@@ -17,11 +17,13 @@ type Querier interface {
 	CountTemplates(ctx context.Context, arg CountTemplatesParams) (int64, error)
 	CountUnread(ctx context.Context, arg CountUnreadParams) (int64, error)
 	CreateDeadLetter(ctx context.Context, arg CreateDeadLetterParams) (DeadLetterMessage, error)
+	DeactivateDeviceToken(ctx context.Context, arg DeactivateDeviceTokenParams) error
 	DeleteDeadLetter(ctx context.Context, arg DeleteDeadLetterParams) error
 	DeletePreference(ctx context.Context, arg DeletePreferenceParams) error
 	DeleteTemplate(ctx context.Context, arg DeleteTemplateParams) (Template, error)
 	GetAPIClientByKeyHash(ctx context.Context, apiKeyHash string) (GetAPIClientByKeyHashRow, error)
 	GetDeadLetterByID(ctx context.Context, arg GetDeadLetterByIDParams) (DeadLetterMessage, error)
+	GetDeviceToken(ctx context.Context, arg GetDeviceTokenParams) (DeviceToken, error)
 	GetInAppMessage(ctx context.Context, arg GetInAppMessageParams) (InappMessage, error)
 	GetLatestDeliveryLog(ctx context.Context, notificationID uuid.UUID) (DeliveryLog, error)
 	GetNotificationByID(ctx context.Context, arg GetNotificationByIDParams) (Notification, error)
@@ -37,6 +39,7 @@ type Querier interface {
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (Notification, error)
 	InsertTemplate(ctx context.Context, arg InsertTemplateParams) (Template, error)
 	InsertTenant(ctx context.Context, name string) (Tenant, error)
+	ListActiveDeviceTokensByUser(ctx context.Context, arg ListActiveDeviceTokensByUserParams) ([]DeviceToken, error)
 	ListDeadLetters(ctx context.Context, arg ListDeadLettersParams) ([]DeadLetterMessage, error)
 	ListDeliveryLogsByNotification(ctx context.Context, notificationID uuid.UUID) ([]DeliveryLog, error)
 	ListDueScheduledNotifications(ctx context.Context, limit int32) ([]Notification, error)
@@ -49,6 +52,7 @@ type Querier interface {
 	MarkInAppMessageRead(ctx context.Context, arg MarkInAppMessageReadParams) error
 	UpdateNotificationStatus(ctx context.Context, arg UpdateNotificationStatusParams) (Notification, error)
 	UpdateTemplate(ctx context.Context, arg UpdateTemplateParams) (Template, error)
+	UpsertDeviceToken(ctx context.Context, arg UpsertDeviceTokenParams) (DeviceToken, error)
 	UpsertPreference(ctx context.Context, arg UpsertPreferenceParams) (Preference, error)
 }
 

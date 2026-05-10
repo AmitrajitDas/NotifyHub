@@ -13,6 +13,7 @@ import (
 
 	"github.com/amitrajitdas31/notifyhub/internal/api/middleware"
 	"github.com/amitrajitdas31/notifyhub/internal/api/response"
+	"github.com/amitrajitdas31/notifyhub/internal/auth"
 	"github.com/amitrajitdas31/notifyhub/internal/domain"
 	"github.com/amitrajitdas31/notifyhub/internal/observability"
 	"github.com/amitrajitdas31/notifyhub/internal/realtime"
@@ -21,23 +22,25 @@ import (
 
 // InboxHandler serves inbox REST endpoints and the WebSocket stream.
 type InboxHandler struct {
-	repo             repository.InAppRepository
-	hub              *realtime.Hub
-	metrics          *observability.Metrics
-	logger           *slog.Logger
-	heartbeat        time.Duration
-	readTimeout      time.Duration
+	repo        repository.InAppRepository
+	hub         *realtime.Hub
+	wsToken     *auth.WSTokenService
+	metrics     *observability.Metrics
+	logger      *slog.Logger
+	heartbeat   time.Duration
+	readTimeout time.Duration
 }
 
 // InboxHandlerConfig holds tunable parameters for InboxHandler.
 type InboxHandlerConfig struct {
-	HeartbeatSeconds  int
+	HeartbeatSeconds   int
 	ReadTimeoutSeconds int
 }
 
 func NewInboxHandler(
 	repo repository.InAppRepository,
 	hub *realtime.Hub,
+	wsToken *auth.WSTokenService,
 	metrics *observability.Metrics,
 	logger *slog.Logger,
 	cfg InboxHandlerConfig,
@@ -53,6 +56,7 @@ func NewInboxHandler(
 	return &InboxHandler{
 		repo:        repo,
 		hub:         hub,
+		wsToken:     wsToken,
 		metrics:     metrics,
 		logger:      logger,
 		heartbeat:   hb,
@@ -176,16 +180,24 @@ func (h *InboxHandler) MarkAllRead(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// GET /api/v1/inbox/stream — WebSocket; sends JSON InAppMessage frames as they arrive.
+// GET /api/v1/inbox/stream?token=<jwt> — WebSocket; sends JSON InAppMessage frames as they arrive.
+// Identity is derived from the signed JWT; X-Recipient-ID is ignored.
+// Connections without a valid token are closed with status 4401.
 func (h *InboxHandler) Stream(w http.ResponseWriter, r *http.Request) {
-	tenantID := middleware.ClientFromContext(r.Context()).TenantID
-
-	recipientID, appErr := recipientIDFromHeader(r)
-	if appErr != nil {
-		reqID := middleware.RequestIDFromContext(r.Context())
-		response.JSONError(w, appErr, reqID)
+	tokenStr := r.URL.Query().Get("token")
+	if tokenStr == "" {
+		http.Error(w, "token required", http.StatusUnauthorized)
 		return
 	}
+
+	claims, err := h.wsToken.Verify(tokenStr)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	tenantID := claims.TenantID
+	recipientID := claims.RecipientID
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true, // allow cross-origin from same cluster / dev

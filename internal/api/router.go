@@ -32,6 +32,7 @@ type RouterDeps struct {
 	DLQ         *handler.DLQHandler
 	Inbox       *handler.InboxHandler
 	DeviceToken *handler.DeviceTokenHandler
+	WSToken     *handler.WSTokenHandler
 }
 
 func NewRouter(deps RouterDeps) http.Handler {
@@ -104,6 +105,11 @@ func NewRouter(deps RouterDeps) http.Handler {
 				r.Put("/{channel}", deps.Preference.Upsert)
 				r.Delete("/{channel}", deps.Preference.Delete)
 			})
+
+			// WebSocket JWT issuance
+			if deps.WSToken != nil {
+				r.Post("/ws-token", deps.WSToken.Issue)
+			}
 
 			// Device tokens (FCM push)
 			if deps.DeviceToken != nil {

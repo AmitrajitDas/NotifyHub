@@ -51,9 +51,13 @@ type Config struct {
 	RateLimitInAppPerHour int
 
 	// In-app WebSocket
-	InAppWSHeartbeatSeconds  int
-	InAppWSBufferSize        int
+	InAppWSHeartbeatSeconds   int
+	InAppWSBufferSize         int
 	InAppWSReadTimeoutSeconds int
+
+	// WebSocket JWT
+	WSJWTSecret     string
+	WSJWTTTLSeconds int
 
 	// Admin
 	AdminToken string
@@ -169,6 +173,10 @@ func Load() (*Config, error) {
 	}
 	if cfg.InAppWSReadTimeoutSeconds, err = getEnvInt("INAPP_WS_READ_TIMEOUT_SECONDS", 60); err != nil {
 		return nil, fmt.Errorf("INAPP_WS_READ_TIMEOUT_SECONDS: %w", err)
+	}
+	cfg.WSJWTSecret = getEnv("WS_JWT_SECRET", "")
+	if cfg.WSJWTTTLSeconds, err = getEnvInt("WS_JWT_TTL_SECONDS", 60); err != nil {
+		return nil, fmt.Errorf("WS_JWT_TTL_SECONDS: %w", err)
 	}
 
 	if cfg.OTELSampleRatio, err = getEnvFloat("OTEL_TRACES_SAMPLER_ARG", 0.1); err != nil {

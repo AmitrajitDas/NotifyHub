@@ -17,6 +17,7 @@ import (
 
 	"github.com/amitrajitdas31/notifyhub/internal/api"
 	"github.com/amitrajitdas31/notifyhub/internal/api/handler"
+	"github.com/amitrajitdas31/notifyhub/internal/auth"
 	"github.com/amitrajitdas31/notifyhub/internal/config"
 	"github.com/amitrajitdas31/notifyhub/internal/db"
 	"github.com/amitrajitdas31/notifyhub/internal/observability"
@@ -121,6 +122,7 @@ func main() {
 	notifSvc := service.NewNotificationService(notifRepo, publisher, validate, metrics, cfg.WorkerRetryMaxAttempts)
 	rateLimitSvc := service.NewRateLimitService(redisClient)
 	deviceTokenSvc := service.NewDeviceTokenService(deviceTokenRepo, validate)
+	wsTokenSvc := auth.NewWSTokenService(cfg.WSJWTSecret, cfg.WSJWTTTLSeconds)
 
 	// 10b. In-app realtime hub — subscribe to Redis pub/sub
 	hub := realtime.NewHub(redisClient, logger, cfg.InAppWSBufferSize)
@@ -144,7 +146,8 @@ func main() {
 	tenantHandler := handler.NewTenantHandler(tenantSvc)
 	dlqHandler := handler.NewDLQHandler(dlqRepo, publisher, cfg.WorkerRetryMaxAttempts)
 	deviceTokenHandler := handler.NewDeviceTokenHandler(deviceTokenSvc)
-	inboxHandler := handler.NewInboxHandler(inappRepo, hub, metrics, logger, handler.InboxHandlerConfig{
+	wsTokenHandler := handler.NewWSTokenHandler(wsTokenSvc)
+	inboxHandler := handler.NewInboxHandler(inappRepo, hub, wsTokenSvc, metrics, logger, handler.InboxHandlerConfig{
 		HeartbeatSeconds:   cfg.InAppWSHeartbeatSeconds,
 		ReadTimeoutSeconds: cfg.InAppWSReadTimeoutSeconds,
 	})
@@ -165,6 +168,7 @@ func main() {
 		DLQ:          dlqHandler,
 		Inbox:       inboxHandler,
 		DeviceToken: deviceTokenHandler,
+		WSToken:     wsTokenHandler,
 	})
 
 	// 14. HTTP server

@@ -105,6 +105,7 @@ func main() {
 	dlqRepo := repository.NewDeadLetterRepository(queries)
 	inappRepo := repository.NewInAppRepository(queries)
 	deviceTokenRepo := repository.NewDeviceTokenRepository(queries)
+	webhookRepo := repository.NewWebhookRepository(queries)
 
 	// 9. Kafka producer
 	publisher := queue.NewProducer(cfg.KafkaBrokers, logger)
@@ -123,6 +124,7 @@ func main() {
 	rateLimitSvc := service.NewRateLimitService(redisClient)
 	deviceTokenSvc := service.NewDeviceTokenService(deviceTokenRepo, validate)
 	wsTokenSvc := auth.NewWSTokenService(cfg.WSJWTSecret, cfg.WSJWTTTLSeconds)
+	webhookSvc := service.NewWebhookService(webhookRepo, publisher, cfg.WebhookMaxAttempts, validate, logger)
 
 	// 10b. In-app realtime hub — subscribe to Redis pub/sub
 	hub := realtime.NewHub(redisClient, logger, cfg.InAppWSBufferSize)
@@ -146,6 +148,7 @@ func main() {
 	tenantHandler := handler.NewTenantHandler(tenantSvc)
 	dlqHandler := handler.NewDLQHandler(dlqRepo, publisher, cfg.WorkerRetryMaxAttempts)
 	deviceTokenHandler := handler.NewDeviceTokenHandler(deviceTokenSvc)
+	webhookHandler := handler.NewWebhookHandler(webhookSvc)
 	wsTokenHandler := handler.NewWSTokenHandler(wsTokenSvc)
 	inboxHandler := handler.NewInboxHandler(inappRepo, hub, wsTokenSvc, metrics, logger, handler.InboxHandlerConfig{
 		HeartbeatSeconds:   cfg.InAppWSHeartbeatSeconds,
@@ -166,9 +169,10 @@ func main() {
 		Preference:   prefHandler,
 		Tenant:       tenantHandler,
 		DLQ:          dlqHandler,
-		Inbox:       inboxHandler,
-		DeviceToken: deviceTokenHandler,
-		WSToken:     wsTokenHandler,
+		Inbox:        inboxHandler,
+		DeviceToken:  deviceTokenHandler,
+		WSToken:      wsTokenHandler,
+		Webhook:      webhookHandler,
 	})
 
 	// 14. HTTP server

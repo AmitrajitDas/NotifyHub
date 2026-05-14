@@ -39,3 +39,20 @@ WHERE id = $1 AND tenant_id = $2 AND recipient_id = $3 AND read_at IS NULL;
 UPDATE inapp_messages
 SET read_at = now()
 WHERE tenant_id = $1 AND recipient_id = $2 AND read_at IS NULL;
+
+-- name: ListInboxAfterCursor :many
+SELECT * FROM inapp_messages
+WHERE tenant_id = $1::uuid
+  AND recipient_id = $2::text
+  AND (NOT $3::boolean OR read_at IS NULL)
+  AND (created_at < $4 OR (created_at = $4 AND id < $5::uuid))
+ORDER BY created_at DESC, id DESC
+LIMIT $6::int;
+
+-- name: ListInboxSince :many
+SELECT * FROM inapp_messages
+WHERE tenant_id = $1::uuid
+  AND recipient_id = $2::text
+  AND (created_at > $3 OR (created_at = $3 AND id > $4::uuid))
+ORDER BY created_at ASC, id ASC
+LIMIT 200;

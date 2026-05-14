@@ -76,6 +76,10 @@ type Metrics struct {
 	InAppWSConnections prometheus.Gauge
 	InAppWSDropped    prometheus.Counter
 	InAppPubSubPublished prometheus.Counter
+
+	// Outbound webhooks.
+	WebhookDelivered *prometheus.CounterVec // labels: event
+	WebhookFailed    *prometheus.CounterVec // labels: event
 }
 
 // NewMetrics builds a Metrics struct backed by a fresh registry.
@@ -272,6 +276,25 @@ func NewMetrics(version, commit, env string) *Metrics {
 			Name:      "pubsub_published_total",
 			Help:      "In-app messages published to Redis pub/sub.",
 		}),
+
+		WebhookDelivered: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "notifyhub",
+				Subsystem: "webhook",
+				Name:      "delivered_total",
+				Help:      "Outbound webhook deliveries successfully acknowledged by the endpoint.",
+			},
+			[]string{"event"},
+		),
+		WebhookFailed: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "notifyhub",
+				Subsystem: "webhook",
+				Name:      "failed_total",
+				Help:      "Outbound webhook deliveries that exhausted all retry attempts.",
+			},
+			[]string{"event"},
+		),
 	}
 
 	reg.MustRegister(
@@ -286,6 +309,7 @@ func NewMetrics(version, commit, env string) *Metrics {
 		m.DLQPersisted, m.DLQReplayed, m.DLQDepth,
 		m.InAppPersisted, m.InAppWSConnections,
 		m.InAppWSDropped, m.InAppPubSubPublished,
+		m.WebhookDelivered, m.WebhookFailed,
 	)
 
 	m.BuildInfo.WithLabelValues(version, commit, env).Set(1)

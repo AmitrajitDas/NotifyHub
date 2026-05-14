@@ -47,3 +47,21 @@ type DLQMessage struct {
 	LastAttempt    int       `json:"last_attempt"`
 	DeadLetteredAt time.Time `json:"dead_lettered_at"`
 }
+
+// WebhookTopic is the Kafka topic for outbound webhook dispatch.
+const WebhookTopic = "notifyhub.webhooks.outbound"
+
+// WebhookMessage is the Kafka envelope for one outbound webhook dispatch attempt.
+type WebhookMessage struct {
+	TenantID       uuid.UUID      `json:"tenant_id"`
+	EndpointID     uuid.UUID      `json:"endpoint_id"`
+	DeliveryID     uuid.UUID      `json:"delivery_id"`
+	NotificationID *uuid.UUID     `json:"notification_id,omitempty"`
+	Event          string         `json:"event"`
+	Payload        map[string]any `json:"payload"`
+	EndpointURL    string         `json:"endpoint_url"`
+	Secret         string         `json:"secret"`
+	Attempt        int            `json:"attempt"`
+	MaxAttempts    int            `json:"max_attempts"`
+	EnqueuedAt     time.Time      `json:"enqueued_at"`
+}

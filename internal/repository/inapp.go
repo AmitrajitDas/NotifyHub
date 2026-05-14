@@ -14,6 +14,9 @@ type InAppRepository interface {
 	Insert(ctx context.Context, msg domain.InAppMessage) (*domain.InAppMessage, error)
 	GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.InAppMessage, error)
 	List(ctx context.Context, q domain.InboxQuery) ([]domain.InAppMessage, error)
+	// ListSince returns all messages newer than sinceID, ordered oldest-first.
+	// Used by the WS stream handler to replay missed messages after reconnect.
+	ListSince(ctx context.Context, tenantID uuid.UUID, recipientID string, sinceID uuid.UUID) ([]domain.InAppMessage, error)
 	CountUnread(ctx context.Context, tenantID uuid.UUID, recipientID string) (int64, error)
 	MarkRead(ctx context.Context, tenantID, id uuid.UUID, recipientID string) error
 	MarkAllRead(ctx context.Context, tenantID uuid.UUID, recipientID string) error
@@ -60,6 +63,31 @@ func (r *postgresInAppRepo) List(ctx context.Context, q domain.InboxQuery) ([]do
 	if limit <= 0 {
 		limit = 50
 	}
+	if q.AfterID != nil {
+		cursor, err := r.q.GetInAppMessage(ctx, db.GetInAppMessageParams{
+			ID:       *q.AfterID,
+			TenantID: q.TenantID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list inbox cursor lookup: %w", err)
+		}
+		rows, err := r.q.ListInboxAfterCursor(ctx, db.ListInboxAfterCursorParams{
+			TenantID:    q.TenantID,
+			RecipientID: q.RecipientID,
+			UnreadOnly:  q.UnreadOnly,
+			CursorTime:  cursor.CreatedAt,
+			CursorID:    cursor.ID,
+			Limit:       int32(limit),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list inbox after cursor: %w", err)
+		}
+		out := make([]domain.InAppMessage, len(rows))
+		for i, row := range rows {
+			out[i] = fromDBInApp(row)
+		}
+		return out, nil
+	}
 	rows, err := r.q.ListInbox(ctx, db.ListInboxParams{
 		TenantID:    q.TenantID,
 		RecipientID: q.RecipientID,
@@ -69,6 +97,30 @@ func (r *postgresInAppRepo) List(ctx context.Context, q domain.InboxQuery) ([]do
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list inbox: %w", err)
+	}
+	out := make([]domain.InAppMessage, len(rows))
+	for i, row := range rows {
+		out[i] = fromDBInApp(row)
+	}
+	return out, nil
+}
+
+func (r *postgresInAppRepo) ListSince(ctx context.Context, tenantID uuid.UUID, recipientID string, sinceID uuid.UUID) ([]domain.InAppMessage, error) {
+	cursor, err := r.q.GetInAppMessage(ctx, db.GetInAppMessageParams{
+		ID:       sinceID,
+		TenantID: tenantID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list inbox since cursor lookup: %w", err)
+	}
+	rows, err := r.q.ListInboxSince(ctx, db.ListInboxSinceParams{
+		TenantID:    tenantID,
+		RecipientID: recipientID,
+		CursorTime:  cursor.CreatedAt,
+		CursorID:    cursor.ID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list inbox since: %w", err)
 	}
 	out := make([]domain.InAppMessage, len(rows))
 	for i, row := range rows {

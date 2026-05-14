@@ -27,7 +27,7 @@ func NewConsumer(brokers []string, topic, groupID string, logger *slog.Logger) *
 		MaxBytes:       10 << 20,         // 10 MB cap per fetch response
 		MaxWait:        1 * time.Second,  // max idle wait; keeps ctx cancellation responsive
 		CommitInterval: 0,                // disable auto-commit; we commit manually
-		StartOffset:    kafka.LastOffset, // new groups start from latest, not beginning
+		StartOffset:    kafka.FirstOffset, // new groups replay from earliest uncommitted offset
 		Logger: kafka.LoggerFunc(func(msg string, args ...interface{}) {
 			logger.Debug(fmt.Sprintf(msg, args...))
 		}),

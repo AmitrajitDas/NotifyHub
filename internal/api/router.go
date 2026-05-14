@@ -33,6 +33,7 @@ type RouterDeps struct {
 	Inbox       *handler.InboxHandler
 	DeviceToken *handler.DeviceTokenHandler
 	WSToken     *handler.WSTokenHandler
+	Webhook     *handler.WebhookHandler
 }
 
 func NewRouter(deps RouterDeps) http.Handler {
@@ -43,8 +44,13 @@ func NewRouter(deps RouterDeps) http.Handler {
 	r.Use(middleware.RequestID)
 	// otelhttp creates a server span per request and propagates W3C traceparent.
 	// It must run before Logging so the trace_id is available when we log.
+	// Filter skips the WebSocket stream route: otelhttp wraps ResponseWriter in a
+	// type that strips http.Hijacker, which coder/websocket requires for HTTP/1.1.
 	r.Use(otelhttp.NewMiddleware("notifyhub-api",
 		otelhttp.WithMessageEvents(otelhttp.ReadEvents, otelhttp.WriteEvents),
+		otelhttp.WithFilter(func(req *http.Request) bool {
+			return req.URL.Path != "/api/v1/inbox/stream"
+		}),
 	))
 	r.Use(middleware.Logging(deps.Logger))
 	r.Use(middleware.Recovery(deps.Logger))
@@ -126,11 +132,27 @@ func NewRouter(deps RouterDeps) http.Handler {
 					r.Get("/unread-count", deps.Inbox.UnreadCount)
 					r.Post("/read-all", deps.Inbox.MarkAllRead)
 					r.Post("/{id}/read", deps.Inbox.MarkRead)
-					r.Get("/stream", deps.Inbox.Stream)
+				})
+			}
+
+			// Outbound webhook endpoints
+			if deps.Webhook != nil {
+				r.Route("/webhooks", func(r chi.Router) {
+					r.Post("/", deps.Webhook.Create)
+					r.Get("/", deps.Webhook.List)
+					r.Get("/{id}", deps.Webhook.GetByID)
+					r.Put("/{id}", deps.Webhook.Update)
+					r.Delete("/{id}", deps.Webhook.Delete)
 				})
 			}
 		})
 	})
+
+	// WebSocket stream — JWT auth is handled by the handler itself; cannot use
+	// X-API-Key middleware because browsers cannot send custom headers on WS upgrade.
+	if deps.Inbox != nil {
+		r.Get("/api/v1/inbox/stream", deps.Inbox.Stream)
+	}
 
 	return r
 }

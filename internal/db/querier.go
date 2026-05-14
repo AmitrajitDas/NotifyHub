@@ -21,6 +21,7 @@ type Querier interface {
 	DeleteDeadLetter(ctx context.Context, arg DeleteDeadLetterParams) error
 	DeletePreference(ctx context.Context, arg DeletePreferenceParams) error
 	DeleteTemplate(ctx context.Context, arg DeleteTemplateParams) (Template, error)
+	DeleteWebhookEndpoint(ctx context.Context, arg DeleteWebhookEndpointParams) error
 	GetAPIClientByKeyHash(ctx context.Context, apiKeyHash string) (GetAPIClientByKeyHashRow, error)
 	GetDeadLetterByID(ctx context.Context, arg GetDeadLetterByIDParams) (DeadLetterMessage, error)
 	GetDeviceToken(ctx context.Context, arg GetDeviceTokenParams) (DeviceToken, error)
@@ -33,13 +34,17 @@ type Querier interface {
 	GetTemplateByName(ctx context.Context, arg GetTemplateByNameParams) (Template, error)
 	GetTenantByID(ctx context.Context, id uuid.UUID) (Tenant, error)
 	GetTenantByName(ctx context.Context, name string) (Tenant, error)
+	GetWebhookEndpoint(ctx context.Context, arg GetWebhookEndpointParams) (WebhookEndpoint, error)
 	InsertAPIClient(ctx context.Context, arg InsertAPIClientParams) (InsertAPIClientRow, error)
 	InsertDeliveryLog(ctx context.Context, arg InsertDeliveryLogParams) (DeliveryLog, error)
 	InsertInAppMessage(ctx context.Context, arg InsertInAppMessageParams) (InappMessage, error)
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (Notification, error)
 	InsertTemplate(ctx context.Context, arg InsertTemplateParams) (Template, error)
 	InsertTenant(ctx context.Context, name string) (Tenant, error)
+	InsertWebhookDelivery(ctx context.Context, arg InsertWebhookDeliveryParams) (WebhookDelivery, error)
+	InsertWebhookEndpoint(ctx context.Context, arg InsertWebhookEndpointParams) (WebhookEndpoint, error)
 	ListActiveDeviceTokensByUser(ctx context.Context, arg ListActiveDeviceTokensByUserParams) ([]DeviceToken, error)
+	ListActiveWebhookEndpointsForEvent(ctx context.Context, arg ListActiveWebhookEndpointsForEventParams) ([]WebhookEndpoint, error)
 	ListDeadLetters(ctx context.Context, arg ListDeadLettersParams) ([]DeadLetterMessage, error)
 	ListDeliveryLogsByNotification(ctx context.Context, notificationID uuid.UUID) ([]DeliveryLog, error)
 	ListDueScheduledNotifications(ctx context.Context, limit int32) ([]Notification, error)
@@ -47,11 +52,14 @@ type Querier interface {
 	ListNotifications(ctx context.Context, arg ListNotificationsParams) ([]Notification, error)
 	ListPreferencesByUser(ctx context.Context, arg ListPreferencesByUserParams) ([]Preference, error)
 	ListTemplates(ctx context.Context, arg ListTemplatesParams) ([]Template, error)
+	ListWebhookEndpoints(ctx context.Context, tenantID uuid.UUID) ([]WebhookEndpoint, error)
 	MarkAllInAppMessagesRead(ctx context.Context, arg MarkAllInAppMessagesReadParams) error
 	MarkDeadLetterReplayed(ctx context.Context, arg MarkDeadLetterReplayedParams) error
 	MarkInAppMessageRead(ctx context.Context, arg MarkInAppMessageReadParams) error
 	UpdateNotificationStatus(ctx context.Context, arg UpdateNotificationStatusParams) (Notification, error)
 	UpdateTemplate(ctx context.Context, arg UpdateTemplateParams) (Template, error)
+	UpdateWebhookDelivery(ctx context.Context, arg UpdateWebhookDeliveryParams) (WebhookDelivery, error)
+	UpdateWebhookEndpoint(ctx context.Context, arg UpdateWebhookEndpointParams) (WebhookEndpoint, error)
 	UpsertDeviceToken(ctx context.Context, arg UpsertDeviceTokenParams) (DeviceToken, error)
 	UpsertPreference(ctx context.Context, arg UpsertPreferenceParams) (Preference, error)
 }

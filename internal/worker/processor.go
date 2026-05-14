@@ -25,6 +25,12 @@ type DLQPublisher interface {
 	PublishDLQ(ctx context.Context, msg queue.DLQMessage) error
 }
 
+// WebhookDispatcher fans out webhook events to registered tenant endpoints
+// after a notification reaches a terminal status. Nil disables dispatch.
+type WebhookDispatcher interface {
+	Dispatch(ctx context.Context, n *domain.Notification, event string) error
+}
+
 // ProcessorDeps groups all dependencies required to build a Processor.
 // Using a struct keeps the constructor signature within linter limits and
 // makes the call site self-documenting.
@@ -39,8 +45,9 @@ type ProcessorDeps struct {
 	RateCaps         map[domain.Channel]int // per-channel hourly cap from config
 	RetryDelay       time.Duration          // base delay; actual = RetryDelay * 2^(attempt-1)
 	Logger           *slog.Logger
-	DLQPublisher     DLQPublisher // nil disables DLQ routing
+	DLQPublisher     DLQPublisher     // nil disables DLQ routing
 	DLQEnabled       bool
+	Webhook          WebhookDispatcher // nil disables webhook fanout
 }
 
 // Processor runs the full delivery pipeline for a single queue.Message.
@@ -168,6 +175,7 @@ func (p *Processor) deliver(ctx context.Context, msg queue.Message, n *domain.No
 			p.logDelivery(ctx, msg, n, domain.DeliveryFailed, &errMsg, nil, nil)
 			p.deadLetter(ctx, msg, domain.DLQReasonTemplateRender, errMsg)
 			p.updateStatus(ctx, n.ID, domain.StatusFailed)
+			p.dispatchWebhook(ctx, n, domain.WebhookEventFailed)
 			return observability.StatusFailed, nil
 		}
 		payload["_subject"] = subject
@@ -185,6 +193,7 @@ func (p *Processor) deliver(ctx context.Context, msg queue.Message, n *domain.No
 		p.logDelivery(ctx, msg, n, domain.DeliveryFailed, &errMsg, nil, nil)
 		p.deadLetter(ctx, msg, domain.DLQReasonNoProvider, errMsg)
 		p.updateStatus(ctx, n.ID, domain.StatusFailed)
+		p.dispatchWebhook(ctx, n, domain.WebhookEventFailed)
 		return observability.StatusFailed, nil
 	}
 
@@ -200,6 +209,7 @@ func (p *Processor) deliver(ctx context.Context, msg queue.Message, n *domain.No
 		p.logDelivery(ctx, msg, n, domain.DeliveryFailed, &errMsg, nil, nil)
 		p.deadLetter(ctx, msg, reason, errMsg)
 		p.updateStatus(ctx, n.ID, domain.StatusFailed)
+		p.dispatchWebhook(ctx, n, domain.WebhookEventFailed)
 		log.ErrorContext(ctx, "notification failed", slog.Any("error", sendErr))
 		return observability.StatusFailed, nil
 	}
@@ -207,6 +217,7 @@ func (p *Processor) deliver(ctx context.Context, msg queue.Message, n *domain.No
 	now := time.Now().UTC()
 	p.logDelivery(ctx, msg, n, domain.DeliverySuccess, nil, nil, &now)
 	p.updateStatus(ctx, n.ID, domain.StatusDelivered)
+	p.dispatchWebhook(ctx, n, domain.WebhookEventDelivered)
 	log.InfoContext(ctx, "notification delivered")
 	return observability.StatusDelivered, nil
 }
@@ -300,6 +311,21 @@ func setSpanErr(span trace.Span, op string, err error) {
 func (p *Processor) drop(ctx context.Context, msg queue.Message, n *domain.Notification, reason string) {
 	p.logDelivery(ctx, msg, n, domain.DeliveryFailed, &reason, nil, nil)
 	p.updateStatus(ctx, n.ID, domain.StatusDropped)
+	p.dispatchWebhook(ctx, n, domain.WebhookEventDropped)
+}
+
+// dispatchWebhook fans out a webhook event non-fatally; errors are logged only.
+func (p *Processor) dispatchWebhook(ctx context.Context, n *domain.Notification, event string) {
+	if p.deps.Webhook == nil {
+		return
+	}
+	if err := p.deps.Webhook.Dispatch(ctx, n, event); err != nil {
+		p.deps.Logger.ErrorContext(ctx, "webhook dispatch failed",
+			slog.String("notification_id", n.ID.String()),
+			slog.String("event", event),
+			slog.Any("error", err),
+		)
+	}
 }
 
 // logDelivery persists a delivery attempt record. Non-fatal: errors are logged only.

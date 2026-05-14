@@ -1,0 +1,626 @@
+openapi: 3.0.3
+info:
+  title: NotifyHub API
+  version: 0.1.0
+  description: Multi-channel notification API for tenant-scoped sends, templates, preferences, inbox, device tokens, webhooks, and internal operations.
+servers:
+  - url: http://localhost:8080
+security:
+  - ApiKeyAuth: []
+tags:
+  - name: Health
+  - name: Notifications
+  - name: Templates
+  - name: Preferences
+  - name: Inbox
+  - name: Device Tokens
+  - name: Webhooks
+  - name: Internal
+paths:
+  /health:
+    get:
+      tags: [Health]
+      security: []
+      summary: Deep health check
+      responses:
+        "200":
+          description: Dependencies are reachable.
+  /livez:
+    get:
+      tags: [Health]
+      security: []
+      summary: Liveness probe
+      responses:
+        "200":
+          description: Process is alive.
+  /readyz:
+    get:
+      tags: [Health]
+      security: []
+      summary: Readiness probe
+      responses:
+        "200":
+          description: Service is ready.
+  /api/v1/notifications:
+    post:
+      tags: [Notifications]
+      summary: Send a notification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendRequest"
+      responses:
+        "202":
+          description: Notification accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Notification"
+    get:
+      tags: [Notifications]
+      summary: List notifications
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+        - name: recipient_id
+          in: query
+          schema: { type: string }
+        - name: channel
+          in: query
+          schema: { $ref: "#/components/schemas/Channel" }
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/NotificationStatus" }
+      responses:
+        "200":
+          description: Paged notifications.
+  /api/v1/notifications/bulk:
+    post:
+      tags: [Notifications]
+      summary: Send notifications to up to 1000 recipients
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkSendRequest"
+      responses:
+        "202":
+          description: Bulk send accepted with per-recipient results.
+  /api/v1/notifications/{id}:
+    get:
+      tags: [Notifications]
+      summary: Get a notification
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Notification.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Notification"
+    delete:
+      tags: [Notifications]
+      summary: Cancel a pending notification
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Canceled notification.
+  /api/v1/templates:
+    post:
+      tags: [Templates]
+      summary: Create a template
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTemplateRequest"
+      responses:
+        "201":
+          description: Created template.
+    get:
+      tags: [Templates]
+      summary: List templates
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+        - name: channel
+          in: query
+          schema: { $ref: "#/components/schemas/Channel" }
+      responses:
+        "200":
+          description: Paged templates.
+  /api/v1/templates/{id}:
+    get:
+      tags: [Templates]
+      summary: Get a template
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Template.
+    put:
+      tags: [Templates]
+      summary: Update a template
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTemplateRequest"
+      responses:
+        "200":
+          description: Updated template.
+    delete:
+      tags: [Templates]
+      summary: Delete a template
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Deleted template.
+  /api/v1/templates/{id}/preview:
+    post:
+      tags: [Templates]
+      summary: Preview a rendered template
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PreviewTemplateRequest"
+      responses:
+        "200":
+          description: Rendered template preview.
+  /api/v1/users/{user_id}/preferences:
+    get:
+      tags: [Preferences]
+      summary: List preferences for a recipient
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Preferences.
+  /api/v1/users/{user_id}/preferences/{channel}:
+    put:
+      tags: [Preferences]
+      summary: Upsert a channel preference
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: channel
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/Channel" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertPreferenceRequest"
+      responses:
+        "200":
+          description: Preference.
+    delete:
+      tags: [Preferences]
+      summary: Delete a channel preference
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: channel
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/Channel" }
+      responses:
+        "204":
+          description: Deleted.
+  /api/v1/ws-token:
+    post:
+      tags: [Inbox]
+      summary: Issue a short-lived WebSocket JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [recipient_id]
+              properties:
+                recipient_id: { type: string }
+      responses:
+        "200":
+          description: WebSocket token.
+  /api/v1/inbox:
+    get:
+      tags: [Inbox]
+      summary: List in-app inbox messages
+      parameters:
+        - $ref: "#/components/parameters/RecipientHeader"
+        - name: unread
+          in: query
+          schema: { type: boolean }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200 }
+        - name: after_id
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Inbox messages.
+  /api/v1/inbox/unread-count:
+    get:
+      tags: [Inbox]
+      summary: Count unread in-app messages
+      parameters:
+        - $ref: "#/components/parameters/RecipientHeader"
+      responses:
+        "200":
+          description: Unread count.
+  /api/v1/inbox/{id}/read:
+    post:
+      tags: [Inbox]
+      summary: Mark one message read
+      parameters:
+        - $ref: "#/components/parameters/RecipientHeader"
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "204":
+          description: Marked read.
+  /api/v1/inbox/read-all:
+    post:
+      tags: [Inbox]
+      summary: Mark all inbox messages read
+      parameters:
+        - $ref: "#/components/parameters/RecipientHeader"
+      responses:
+        "204":
+          description: Marked read.
+  /api/v1/inbox/stream:
+    get:
+      tags: [Inbox]
+      security: []
+      summary: WebSocket stream for in-app messages
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema: { type: string }
+        - name: since
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        "101":
+          description: WebSocket upgrade.
+  /api/v1/device-tokens:
+    post:
+      tags: [Device Tokens]
+      summary: Register or refresh a device token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterDeviceTokenRequest"
+      responses:
+        "201":
+          description: Device token.
+  /api/v1/device-tokens/{token}:
+    delete:
+      tags: [Device Tokens]
+      summary: Deregister a device token
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Deregistered.
+  /api/v1/webhooks:
+    post:
+      tags: [Webhooks]
+      summary: Create a webhook endpoint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWebhookEndpointRequest"
+      responses:
+        "201":
+          description: Webhook endpoint.
+    get:
+      tags: [Webhooks]
+      summary: List webhook endpoints
+      responses:
+        "200":
+          description: Webhook endpoints.
+  /api/v1/webhooks/{id}:
+    get:
+      tags: [Webhooks]
+      summary: Get a webhook endpoint
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Webhook endpoint.
+    put:
+      tags: [Webhooks]
+      summary: Update a webhook endpoint
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWebhookEndpointRequest"
+      responses:
+        "200":
+          description: Updated endpoint.
+    delete:
+      tags: [Webhooks]
+      summary: Delete a webhook endpoint
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "204":
+          description: Deleted.
+  /internal/tenants:
+    post:
+      tags: [Internal]
+      security:
+        - AdminTokenAuth: []
+      summary: Create a tenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTenantRequest"
+      responses:
+        "201":
+          description: Tenant.
+  /internal/tenants/{id}/api-keys:
+    post:
+      tags: [Internal]
+      security:
+        - AdminTokenAuth: []
+      summary: Create an API key for a tenant
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAPIKeyRequest"
+      responses:
+        "201":
+          description: API key, returned once.
+  /internal/dlq:
+    get:
+      tags: [Internal]
+      security:
+        - AdminTokenAuth: []
+      summary: List dead-letter messages
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - name: channel
+          in: query
+          schema: { type: string }
+        - name: unreplayed
+          in: query
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: Dead-letter messages.
+  /internal/dlq/{id}:
+    get:
+      tags: [Internal]
+      security:
+        - AdminTokenAuth: []
+      summary: Get a dead-letter message
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Dead-letter message.
+    delete:
+      tags: [Internal]
+      security:
+        - AdminTokenAuth: []
+      summary: Delete a dead-letter message
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "204":
+          description: Deleted.
+  /internal/dlq/{id}/replay:
+    post:
+      tags: [Internal]
+      security:
+        - AdminTokenAuth: []
+      summary: Replay a dead-letter message
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Replayed.
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    AdminTokenAuth:
+      type: apiKey
+      in: header
+      name: X-Admin-Token
+  parameters:
+    ID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PerPage:
+      name: per_page
+      in: query
+      schema: { type: integer, minimum: 1, default: 20 }
+    RecipientHeader:
+      name: X-Recipient-ID
+      in: header
+      required: true
+      schema: { type: string }
+    TenantHeader:
+      name: X-Tenant-ID
+      in: header
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    Channel:
+      type: string
+      enum: [email, push, sms, inapp]
+    NotificationStatus:
+      type: string
+      enum: [pending, queued, processing, delivered, failed, dropped]
+    JSONMap:
+      type: object
+      additionalProperties: true
+    SendRequest:
+      type: object
+      required: [type, channel, recipient_id, recipient_address]
+      properties:
+        type: { type: string }
+        channel: { $ref: "#/components/schemas/Channel" }
+        recipient_id: { type: string }
+        recipient_address: { type: string }
+        template_id: { type: string, format: uuid }
+        payload: { $ref: "#/components/schemas/JSONMap" }
+        priority: { type: integer, minimum: 1, maximum: 10, default: 5 }
+        idempotency_key: { type: string }
+        scheduled_at: { type: string, format: date-time }
+    BulkSendRequest:
+      type: object
+      required: [type, channel, recipients]
+      properties:
+        type: { type: string }
+        channel: { $ref: "#/components/schemas/Channel" }
+        template_id: { type: string, format: uuid }
+        payload: { $ref: "#/components/schemas/JSONMap" }
+        priority: { type: integer, minimum: 1, maximum: 10, default: 5 }
+        recipients:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            required: [recipient_id, recipient_address]
+            properties:
+              recipient_id: { type: string }
+              recipient_address: { type: string }
+              payload: { $ref: "#/components/schemas/JSONMap" }
+    Notification:
+      allOf:
+        - $ref: "#/components/schemas/SendRequest"
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            tenant_id: { type: string, format: uuid }
+            status: { $ref: "#/components/schemas/NotificationStatus" }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+    CreateTemplateRequest:
+      type: object
+      required: [name, channel, body_template]
+      properties:
+        name: { type: string }
+        channel: { $ref: "#/components/schemas/Channel" }
+        subject_template: { type: string }
+        body_template: { type: string }
+        metadata: { $ref: "#/components/schemas/JSONMap" }
+    UpdateTemplateRequest:
+      type: object
+      properties:
+        subject_template: { type: string }
+        body_template: { type: string }
+        metadata: { $ref: "#/components/schemas/JSONMap" }
+        is_active: { type: boolean }
+    PreviewTemplateRequest:
+      type: object
+      required: [payload]
+      properties:
+        payload: { $ref: "#/components/schemas/JSONMap" }
+    UpsertPreferenceRequest:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        quiet_hours_start: { type: string, example: "22:00" }
+        quiet_hours_end: { type: string, example: "08:00" }
+        frequency_cap: { type: integer, minimum: 1 }
+        frequency_window_minutes: { type: integer, minimum: 1 }
+        timezone: { type: string, example: Asia/Kolkata }
+    RegisterDeviceTokenRequest:
+      type: object
+      required: [user_id, token, platform]
+      properties:
+        user_id: { type: string }
+        token: { type: string }
+        platform:
+          type: string
+          enum: [ios, android, web]
+    CreateWebhookEndpointRequest:
+      type: object
+      required: [url, secret, events]
+      properties:
+        url: { type: string, format: uri }
+        secret: { type: string, minLength: 16 }
+        events:
+          type: array
+          items:
+            type: string
+            enum: [notification.delivered, notification.failed, notification.dropped, device_token.deactivated]
+    UpdateWebhookEndpointRequest:
+      type: object
+      required: [url, events]
+      properties:
+        url: { type: string, format: uri }
+        events:
+          type: array
+          items:
+            type: string
+        is_active: { type: boolean }
+    CreateTenantRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+    CreateAPIKeyRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }

@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 # NotifyHub
 
@@ -171,3 +171,12 @@ Full specification: `NOTIFICATION_SYSTEM_PLAN.md`
 - [x] **ADRs** — `docs/adr/` (Go over Node, Kafka over RabbitMQ, pgx over GORM, sqlc for queries)
 - [x] **OpenAPI spec** — `docs/api.yaml`
 - [ ] **Kubernetes / Helm** — `charts/notifyhub/` (Helm chart for `api` + `worker`); `deploy/kind-config.yaml` (local); `deploy/eksctl-config.yaml` (EKS reference); infra (Kafka, Redis, Postgres) via Bitnami charts locally / managed services on EKS; HPA per service; Ingress via nginx; GHA `deploy.yml` (`helm upgrade --install` on merge to main). See `docs/k8s-learning.md` for prerequisite concepts.
+
+
+<claude-mem-context>
+# Memory Context
+
+# [Notification-System] recent context, 2026-05-14 11:55pm GMT+5:30
+
+No previous sessions found.
+</claude-mem-context>

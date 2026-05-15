@@ -49,3 +49,7 @@ redis-data/
 
 # k6 results
 scripts/loadtest/results/
+
+# md files
+docs/*.md
+docs/adr/

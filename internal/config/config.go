@@ -51,9 +51,13 @@ type Config struct {
 	RateLimitInAppPerHour int
 
 	// In-app WebSocket
-	InAppWSHeartbeatSeconds  int
-	InAppWSBufferSize        int
+	InAppWSHeartbeatSeconds   int
+	InAppWSBufferSize         int
 	InAppWSReadTimeoutSeconds int
+
+	// WebSocket JWT
+	WSJWTSecret     string
+	WSJWTTTLSeconds int
 
 	// Admin
 	AdminToken string
@@ -62,6 +66,13 @@ type Config struct {
 	DLQEnabled         bool
 	DLQConsumerEnabled bool
 	DLQGroupID         string
+
+	// Webhooks
+	WebhookEnabled     bool
+	WebhookGroupID     string
+	WebhookConcurrency int
+	WebhookMaxAttempts int
+	WebhookRetryBaseMS int
 
 	// Observability — OpenTelemetry
 	// OTELEndpoint is the OTLP gRPC endpoint of the OTel Collector.
@@ -100,6 +111,8 @@ func Load() (*Config, error) {
 		DLQEnabled:             getEnv("DLQ_ENABLED", "true") != "false",
 		DLQConsumerEnabled:     getEnv("DLQ_CONSUMER_ENABLED", "true") != "false",
 		DLQGroupID:             getEnv("DLQ_GROUP_ID", "notifyhub-dlq-consumer"),
+		WebhookEnabled:         getEnv("WEBHOOK_ENABLED", "true") != "false",
+		WebhookGroupID:         getEnv("WEBHOOK_GROUP_ID", "notifyhub-webhook-worker"),
 		OTELEndpoint:           getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
 		OTELInsecure:           getEnv("OTEL_EXPORTER_OTLP_INSECURE", "true") != "false",
 		MetricsPort:            getEnv("METRICS_PORT", "9091"),
@@ -170,9 +183,22 @@ func Load() (*Config, error) {
 	if cfg.InAppWSReadTimeoutSeconds, err = getEnvInt("INAPP_WS_READ_TIMEOUT_SECONDS", 60); err != nil {
 		return nil, fmt.Errorf("INAPP_WS_READ_TIMEOUT_SECONDS: %w", err)
 	}
+	cfg.WSJWTSecret = getEnv("WS_JWT_SECRET", "")
+	if cfg.WSJWTTTLSeconds, err = getEnvInt("WS_JWT_TTL_SECONDS", 60); err != nil {
+		return nil, fmt.Errorf("WS_JWT_TTL_SECONDS: %w", err)
+	}
 
 	if cfg.OTELSampleRatio, err = getEnvFloat("OTEL_TRACES_SAMPLER_ARG", 0.1); err != nil {
 		return nil, fmt.Errorf("OTEL_TRACES_SAMPLER_ARG: %w", err)
+	}
+	if cfg.WebhookConcurrency, err = getEnvInt("WEBHOOK_CONCURRENCY", 3); err != nil {
+		return nil, fmt.Errorf("WEBHOOK_CONCURRENCY: %w", err)
+	}
+	if cfg.WebhookMaxAttempts, err = getEnvInt("WEBHOOK_MAX_ATTEMPTS", 5); err != nil {
+		return nil, fmt.Errorf("WEBHOOK_MAX_ATTEMPTS: %w", err)
+	}
+	if cfg.WebhookRetryBaseMS, err = getEnvInt("WEBHOOK_RETRY_BASE_DELAY_MS", 1000); err != nil {
+		return nil, fmt.Errorf("WEBHOOK_RETRY_BASE_DELAY_MS: %w", err)
 	}
 
 	return cfg, nil

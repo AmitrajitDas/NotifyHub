@@ -24,4 +24,5 @@ type InboxQuery struct {
 	UnreadOnly  bool
 	Limit       int
 	Offset      int
+	AfterID     *uuid.UUID // keyset cursor; if set, Offset is ignored
 }

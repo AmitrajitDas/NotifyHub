@@ -51,6 +51,17 @@ type DeliveryLog struct {
 	DeliveredAt       sql.NullTime   `json:"delivered_at"`
 }
 
+type DeviceToken struct {
+	ID        uuid.UUID `json:"id"`
+	TenantID  uuid.UUID `json:"tenant_id"`
+	UserID    string    `json:"user_id"`
+	Token     string    `json:"token"`
+	Platform  string    `json:"platform"`
+	IsActive  bool      `json:"is_active"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type InappMessage struct {
 	ID             uuid.UUID       `json:"id"`
 	TenantID       uuid.UUID       `json:"tenant_id"`
@@ -115,4 +126,30 @@ type Tenant struct {
 	IsActive  bool      `json:"is_active"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type WebhookDelivery struct {
+	ID             uuid.UUID       `json:"id"`
+	EndpointID     uuid.UUID       `json:"endpoint_id"`
+	NotificationID uuid.NullUUID   `json:"notification_id"`
+	Event          string          `json:"event"`
+	Payload        json.RawMessage `json:"payload"`
+	Status         string          `json:"status"`
+	Attempt        int32           `json:"attempt"`
+	NextRetryAt    sql.NullTime    `json:"next_retry_at"`
+	LastError      sql.NullString  `json:"last_error"`
+	ResponseStatus sql.NullInt32   `json:"response_status"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
+}
+
+type WebhookEndpoint struct {
+	ID        uuid.UUID       `json:"id"`
+	TenantID  uuid.UUID       `json:"tenant_id"`
+	Url       string          `json:"url"`
+	Secret    string          `json:"secret"`
+	Events    json.RawMessage `json:"events"`
+	IsActive  bool            `json:"is_active"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
 }

@@ -1,0 +1,55 @@
+# Binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.test
+*.out
+coverage.html
+coverage.txt
+
+# Build cache
+/tmp/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+*.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# sqlc
+# internal/db/ is generated — keep in source control but ignore any local overrides
+
+# Secrets / keys
+*.pem
+*.key
+*.p12
+*.crt
+
+# Logs
+*.log
+
+# Docker volumes (if mounted locally)
+postgres-data/
+redis-data/
+
+# k6 results
+scripts/loadtest/results/
+
+# md files
+docs/*.md
+docs/adr/

@@ -8,6 +8,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -193,4 +194,117 @@ type MarkInAppMessageReadParams struct {
 func (q *Queries) MarkInAppMessageRead(ctx context.Context, arg MarkInAppMessageReadParams) error {
 	_, err := q.db.ExecContext(ctx, markInAppMessageRead, arg.ID, arg.TenantID, arg.RecipientID)
 	return err
+}
+
+const listInboxAfterCursor = `-- name: ListInboxAfterCursor :many
+SELECT id, tenant_id, notification_id, recipient_id, title, body, payload, read_at, created_at FROM inapp_messages
+WHERE tenant_id = $1::uuid
+  AND recipient_id = $2::text
+  AND (NOT $3::boolean OR read_at IS NULL)
+  AND (created_at < $4 OR (created_at = $4 AND id < $5::uuid))
+ORDER BY created_at DESC, id DESC
+LIMIT $6::int
+`
+
+type ListInboxAfterCursorParams struct {
+	TenantID    uuid.UUID `json:"tenant_id"`
+	RecipientID string    `json:"recipient_id"`
+	UnreadOnly  bool      `json:"unread_only"`
+	CursorTime  time.Time `json:"cursor_time"`
+	CursorID    uuid.UUID `json:"cursor_id"`
+	Limit       int32     `json:"limit_"`
+}
+
+func (q *Queries) ListInboxAfterCursor(ctx context.Context, arg ListInboxAfterCursorParams) ([]InappMessage, error) {
+	rows, err := q.db.QueryContext(ctx, listInboxAfterCursor,
+		arg.TenantID,
+		arg.RecipientID,
+		arg.UnreadOnly,
+		arg.CursorTime,
+		arg.CursorID,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []InappMessage{}
+	for rows.Next() {
+		var i InappMessage
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.NotificationID,
+			&i.RecipientID,
+			&i.Title,
+			&i.Body,
+			&i.Payload,
+			&i.ReadAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listInboxSince = `-- name: ListInboxSince :many
+SELECT id, tenant_id, notification_id, recipient_id, title, body, payload, read_at, created_at FROM inapp_messages
+WHERE tenant_id = $1::uuid
+  AND recipient_id = $2::text
+  AND (created_at > $3 OR (created_at = $3 AND id > $4::uuid))
+ORDER BY created_at ASC, id ASC
+LIMIT 200
+`
+
+type ListInboxSinceParams struct {
+	TenantID    uuid.UUID `json:"tenant_id"`
+	RecipientID string    `json:"recipient_id"`
+	CursorTime  time.Time `json:"cursor_time"`
+	CursorID    uuid.UUID `json:"cursor_id"`
+}
+
+func (q *Queries) ListInboxSince(ctx context.Context, arg ListInboxSinceParams) ([]InappMessage, error) {
+	rows, err := q.db.QueryContext(ctx, listInboxSince,
+		arg.TenantID,
+		arg.RecipientID,
+		arg.CursorTime,
+		arg.CursorID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []InappMessage{}
+	for rows.Next() {
+		var i InappMessage
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.NotificationID,
+			&i.RecipientID,
+			&i.Title,
+			&i.Body,
+			&i.Payload,
+			&i.ReadAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

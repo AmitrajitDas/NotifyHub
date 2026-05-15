@@ -166,8 +166,8 @@ Full specification: `NOTIFICATION_SYSTEM_PLAN.md`
 
 ### Remaining
 
-- [ ] **CI/CD** — `.github/workflows/ci.yml` (lint + test + build), `.github/workflows/docker.yml` (build + push)
-- [ ] **Load tests** — `scripts/loadtest/send_notification.js` (k6)
-- [ ] **ADRs** — `docs/adr/` (Go over Node, Kafka over RabbitMQ, pgx over GORM, sqlc for queries)
-- [ ] **OpenAPI spec** — `docs/api.yaml`
+- [x] **CI/CD** — `.github/workflows/ci.yml` (lint + test + build), `.github/workflows/docker.yml` (build + push)
+- [x] **Load tests** — `scripts/loadtest/send_notification.js` (k6)
+- [x] **ADRs** — `docs/adr/` (Go over Node, Kafka over RabbitMQ, pgx over GORM, sqlc for queries)
+- [x] **OpenAPI spec** — `docs/api.yaml`
 - [ ] **Kubernetes / Helm** — `charts/notifyhub/` (Helm chart for `api` + `worker`); `deploy/kind-config.yaml` (local); `deploy/eksctl-config.yaml` (EKS reference); infra (Kafka, Redis, Postgres) via Bitnami charts locally / managed services on EKS; HPA per service; Ingress via nginx; GHA `deploy.yml` (`helm upgrade --install` on merge to main). See `docs/k8s-learning.md` for prerequisite concepts.

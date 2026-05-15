@@ -102,6 +102,7 @@ func main() {
 	templateRepo := repository.NewTemplateRepository(queries)
 	dlqRepo := repository.NewDeadLetterRepository(queries)
 	inappRepo := repository.NewInAppRepository(queries)
+	webhookRepo := repository.NewWebhookRepository(queries)
 
 	// 6. Services
 	validate := validator.New()
@@ -117,7 +118,16 @@ func main() {
 		}
 	}()
 
-	// 8. Provider registry, processor, scheduler
+	webhookSvc := service.NewWebhookService(webhookRepo, producer, cfg.WebhookMaxAttempts, validate, logger)
+
+	// 8. Pre-create Kafka topics so consumers never join with empty assignments.
+	// CreateTopics is idempotent — safe to call on every startup.
+	if err := queue.EnsureTopics(context.Background(), cfg.KafkaBrokers, logger); err != nil {
+		logger.Error("failed to ensure kafka topics", "error", err)
+		os.Exit(1)
+	}
+
+	// 9. Provider registry, processor, scheduler
 	registry := buildRegistry(cfg, logger, inappRepo, redisClient)
 
 	processor := worker.NewProcessor(worker.ProcessorDeps{
@@ -138,6 +148,7 @@ func main() {
 		Logger:       logger,
 		DLQPublisher: producer,
 		DLQEnabled:   cfg.DLQEnabled,
+		Webhook:      webhookSvc,
 	})
 
 	scheduler := service.NewScheduler(notifRepo, producer, schedulerInterval, schedulerBatch, cfg.WorkerRetryMaxAttempts, logger)
@@ -166,11 +177,12 @@ func main() {
 		slog.Int("inapp_concurrency", cfg.WorkerInAppConcurrency),
 	)
 
-	// 12. Launch pools, DLQ consumers, and scheduler
+	// 12. Launch pools, DLQ consumers, scheduler, and webhook worker
 	var wg sync.WaitGroup
 	startPools(ctx, cfg, processor, logger, &wg)
 	startDLQConsumers(ctx, cfg, dlqRepo, metrics, logger, &wg)
 	startScheduler(ctx, scheduler, logger, &wg)
+	startWebhookWorker(ctx, cfg, webhookRepo, metrics, logger, &wg)
 
 	// 13. Block until signal, then drain in order
 	<-ctx.Done()
@@ -278,6 +290,30 @@ func startScheduler(ctx context.Context, sched *service.Scheduler, logger *slog.
 		if err := sched.Run(ctx); err != nil {
 			logger.Error("scheduler error", slog.Any("error", err))
 		}
+	}()
+}
+
+// startWebhookWorker launches the outbound webhook delivery goroutine when enabled.
+func startWebhookWorker(ctx context.Context, cfg *config.Config, repo repository.WebhookRepository, metrics *observability.Metrics, logger *slog.Logger, wg *sync.WaitGroup) {
+	if !cfg.WebhookEnabled {
+		return
+	}
+	consumer := queue.NewConsumer(cfg.KafkaBrokers, queue.WebhookTopic, cfg.WebhookGroupID, logger)
+	w := worker.NewWebhookWorker(
+		consumer,
+		repo,
+		metrics,
+		time.Duration(cfg.WebhookRetryBaseMS)*time.Millisecond,
+		logger,
+	)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		logger.Info("webhook worker started")
+		if err := w.Run(ctx); err != nil {
+			logger.Error("webhook worker error", slog.Any("error", err))
+		}
+		logger.Info("webhook worker stopped")
 	}()
 }
 
